@@ -37,14 +37,12 @@ class SGDWorker(object):
         self.sess.run(tf.global_variables_initializer())
 
     def compute_gradients(self):
-        print("compute grads", self.i)
         l, g = self.sess.run(
             [self.model.loss, [g[0] for g in self.grad_op]],
             feed_dict=self.model.feed_dict())
         return l, g
 
     def apply_gradients(self, grads):
-        print("apply grads", self.i)
         feed_dict = {
             self.grad_op[i][0]: grads[i] for i in range(len(grads))
         }
@@ -52,13 +50,16 @@ class SGDWorker(object):
 
 
 def average_gradients(grads):
-    return grads[0]  # fake average
+    out = []
+    for grad_list in zip(*grads):
+        out.append(np.mean(grad_list, axis=0))
+    return out
 
 
 # TODO(ekl) replace with allreduce
 def do_sgd_step(actors):
     grads = ray.get([a.compute_gradients.remote() for a in actors])
-    print("avg loss", np.mean([l for (l, g) in grads]))
+    print("Avg loss", np.mean([l for (l, g) in grads]))
     avg_grad = average_gradients([g for (l, g) in grads])
     for a in actors:
         a.apply_gradients.remote(avg_grad)
@@ -69,6 +70,6 @@ if __name__ == "__main__":
 
     model = SimpleModel
     actors = [SGDWorker.remote(i, model) for i in range(2)]
-    for i in range(10):
+    for i in range(100):
         print("Distributed sgd step", i)
         do_sgd_step(actors)
