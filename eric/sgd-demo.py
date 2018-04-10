@@ -5,10 +5,29 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+import tfbench
+
 import ray
 
 
+
 class SimpleModel(object):
+    def __init__(self):
+        self.inputs = tf.placeholder(shape=[None, 4], dtype=tf.float32)
+        self.labels = tf.placeholder(shape=[None, 2], dtype=tf.float32)
+        prediction = slim.fully_connected(
+            self.inputs, 1, scope="layer1")
+        self.loss = tf.reduce_mean(
+            tf.squared_difference(prediction, self.labels))
+
+    def feed_dict(self):
+        return {
+            self.inputs: np.ones((32, 4)),
+            self.labels: np.zeros((32, 2)),
+        }
+
+
+class TFBenchModel(object):
     def __init__(self):
         self.inputs = tf.placeholder(shape=[None, 4], dtype=tf.float32)
         self.labels = tf.placeholder(shape=[None, 2], dtype=tf.float32)
