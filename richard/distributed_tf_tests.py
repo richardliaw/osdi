@@ -5,11 +5,13 @@ import sys
 def to_argv(kwargs):
     return ["--" + k + "=" + str(v) for k, v in kwargs.items()]
 
+
 def generate_host_flags(hosts):
     cmds = {}
     cmds["ps_hosts"] = ",".join([h + ":50000" for h in hosts])
     cmds["worker_hosts"] = ",".join([h + ":50001" for h in hosts])
     return cmds
+
 
 def build_worker_cmd(kwargs):
     kwargs = copy.deepcopy(kwargs)
@@ -17,10 +19,12 @@ def build_worker_cmd(kwargs):
     root = ["python", "tf_cnn_benchmarks.py"] + to_argv(kwargs)
     return " ".join(root)
 
+
 def build_ps_cmd(kwargs):
     kwargs = copy.deepcopy(kwargs)
     kwargs.update({"job_name": "ps"})
-    root = ["CUDA_VISIBLE_DEVICES=", "python", "tf_cnn_benchmarks.py"] + to_argv(kwargs)
+    root = ["CUDA_VISIBLE_DEVICES=", "python", "tf_cnn_benchmarks.py"
+            ] + to_argv(kwargs)
     return " ".join(root)
 
 
@@ -37,6 +41,7 @@ def cmd_builder(hosts, kwargs):
         print("")
         print(build_worker_cmd(hkwargs))
         print("")
+
 
 if __name__ == '__main__':
     hosts = None
