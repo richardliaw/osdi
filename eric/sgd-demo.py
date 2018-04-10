@@ -5,7 +5,6 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-
 import ray
 
 
@@ -67,8 +66,9 @@ def do_sgd_step(actors):
 
 if __name__ == "__main__":
     ray.init()
+    from resnet_demo import RayModel
 
-    model = SimpleModel
+    model = RayModel
     actors = [SGDWorker.remote(i, model) for i in range(2)]
     for i in range(100):
         print("Distributed sgd step", i)
