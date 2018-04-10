@@ -1,0 +1,19 @@
+mpirun -np 8 -bind-to none -map-by slot -x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x PATH -mca pml ob1 -mca btl ^openib -mca plm_rsh_no_tree_spawn 1 python scripts/tf_cnn_benchmarks/tf_cnn_benchmarks.py --model resnet101 --batch_size 64 --variable_update horovod
+
+mpirun -np 16 -H 172.30.0.77:8,172.30.0.28:8 -bind-to none -map-by slot -x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x PATH -mca pml ob1 -mca btl ^openib -mca plm_rsh_no_tree_spawn 1 python scripts/tf_cnn_benchmarks/tf_cnn_benchmarks.py --model resnet101 --batch_size 64 --variable_update horovod
+
+mpirun -np 32 -H 172.30.0.77:8,172.30.0.28:8,172.30.0.190:8,172.30.0.194:8 -bind-to none -map-by slot -x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x PATH -mca pml ob1 -mca btl ^openib -mca plm_rsh_no_tree_spawn 1 python scripts/tf_cnn_benchmarks/tf_cnn_benchmarks.py --model resnet101 --batch_size 64 --variable_update horovod
+
+mpirun -np 64 -H 172.30.0.82:8,172.30.0.148:8,172.30.0.61:8,172.30.0.101:8,172.30.0.13:8,172.30.0.204:8,172.30.0.166:8,172.30.0.222:8 -bind-to none -map-by slot -x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x PATH -mca pml ob1 -mca btl ^openib -mca plm_rsh_no_tree_spawn 1 python scripts/tf_cnn_benchmarks/tf_cnn_benchmarks.py --model resnet101 --batch_size 64 --variable_update horovod
+
+Reproducing https://github.com/uber/horovod/blob/master/docs/benchmarks.md
+
+ResNet-101 benchmark (p3.16xlarge nodes, V100 GPUs, 25Gbps network)
+(single machine)
+1 gpus -> 204.33 images/s
+4 gpus -> 792.41 images/s
+8 gpus -> 1523 images/s
+(cluster)
+16 gpus -> 1529 images/s, 7.51Gbps peak network utilization per node
+32 gpus -> 2958 images/s, 7.79Gbps peak network utilization per node
+64 gpus -> 5806 images/s, 7.93Gbps peak network utilization per node
