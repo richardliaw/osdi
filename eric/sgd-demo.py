@@ -7,6 +7,7 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tfbench import model_config
 import ray
+import time
 
 
 
@@ -45,7 +46,7 @@ class TFBenchModel(object):
         }
 
 
-@ray.remote
+@ray.remote(num_gpus=1)
 class SGDWorker(object):
     def __init__(self, i, model_cls):
         self.i = i
@@ -90,7 +91,10 @@ if __name__ == "__main__":
     # from resnet_demo import RayModel
 
     model = TFBenchModel
-    actors = [SGDWorker.remote(i, model) for i in range(2)]
+    n = 1
+    actors = [SGDWorker.remote(i, model) for i in range(n)]
     for i in range(100):
+        start = time.time()
         print("Distributed sgd step", i)
         do_sgd_step(actors)
+        print("Images per second", 64 * n / (time.time() - start))
