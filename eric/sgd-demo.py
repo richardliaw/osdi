@@ -5,7 +5,7 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-from tfbench import model_config
+from tfbench import model_config, allreduce
 import ray
 import time
 
@@ -48,11 +48,16 @@ class TFBenchModel(object):
 
 @ray.remote(num_gpus=1)
 class SGDWorker(object):
-    def __init__(self, i, model_cls):
+    def __init__(self, i, model_cls, all_reduce_alg=None, num_gpus=1):
         self.i = i
         self.sess = tf.Session()
         self.model = model_cls()
         self.optimizer = tf.train.AdamOptimizer()
+        if all_reduce_alg:
+            # allreduce.sum_gradients_all_reduce()
+            grads_and_vars = allreduce.sum_grad_and_var_all_reduce(
+                grads_and_vars, 1, all_reduce_alg, list(range(num_gpus)))
+
         self.grad_op = self.optimizer.compute_gradients(self.model.loss)
         self.apply_op = self.optimizer.apply_gradients(self.grad_op)
         self.sess.run(tf.global_variables_initializer())
