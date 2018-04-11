@@ -34,7 +34,7 @@ class TFBenchModel(object):
         ## this is currently NHWC
         self.inputs = tf.placeholder(shape=[batch, 224, 224, 3, ], dtype=tf.float32)
         self.labels = tf.placeholder(shape=[batch], dtype=tf.int32)
-        self.model = model_config.get_model_config("resnet50", MockDataset())
+        self.model = model_config.get_model_config("resnet101", MockDataset())
         logits, aux = self.model.build_network(self.inputs, data_format="NHWC")
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=self.labels)
         self.loss = tf.reduce_mean(loss, name='xentropy-loss')
@@ -56,6 +56,9 @@ class SGDWorker(object):
         self.grad_op = self.optimizer.compute_gradients(self.model.loss)
         self.apply_op = self.optimizer.apply_gradients(self.grad_op)
         self.sess.run(tf.global_variables_initializer())
+
+    def compute_apply(self):
+        self.sess.run(self.apply_op, feed_dict=self.model.feed_dict())
 
     def compute_gradients(self):
         l, g = self.sess.run(
@@ -79,6 +82,7 @@ def average_gradients(grads):
 
 # TODO(ekl) replace with allreduce
 def do_sgd_step(actors):
+#    ray.get([a.compute_apply.remote() for a in actors])
     grads = ray.get([a.compute_gradients.remote() for a in actors])
     print("Avg loss", np.mean([l for (l, g) in grads]))
     avg_grad = average_gradients([g for (l, g) in grads])
@@ -91,7 +95,7 @@ if __name__ == "__main__":
     # from resnet_demo import RayModel
 
     model = TFBenchModel
-    n = 1
+    n = 8
     actors = [SGDWorker.remote(i, model) for i in range(n)]
     for i in range(100):
         start = time.time()
