@@ -52,31 +52,44 @@ class TFBenchModel(object):
 
 
 class SGDWorker(object):
-    def __init__(self, i, model_cls, all_reduce_alg=None, num_gpus=1):
+    def __init__(self, i, model_cls, batch_size, all_reduce_alg=None, num_devices=1, use_cpus=False):
         # TODO - just port VariableMgrLocalReplicated
         self.i = i
-        assert num_gpus > 0
-        self.sess = tf.Session()
+        assert num_devices > 0
+        tf_session_args = {
+            "device_count": {"CPU": num_devices}
+        }
+        config_proto = tf.ConfigProto(**tf_session_args)
+        self.sess = tf.Session(config=config_proto)
         models = []
         grad_ops = []
 
-        for device_idx in range(num_gpus):
-            with tf.device("/gpu:%d" % device_idx):
+        if use_cpus:
+            device_tmpl = "/cpu:%d"
+        else:
+            device_tmpl = "/gpu:%d"
+        for device_idx in range(num_devices):
+            with tf.device(device_tmpl % device_idx):
                 with tf.variable_scope("device_%d" % device_idx):
-                    model = model_cls()
+                    model = model_cls(batch=batch_size)
                     models += [model]
                     model.grads = [t for t in model.optimizer.compute_gradients(model.loss) if t[0] is not None]
                     grad_ops.append(model.grads)
 
         self.models = models
-        if num_gpus == 1:
+        if num_devices == 1:
            self.individual_grads = grad_ops
         elif all_reduce_alg:
            self.individual_grads = allreduce.sum_gradients_all_reduce(
-                "", grad_ops, 1, all_reduce_alg, 1, list(range(num_gpus)))
+                "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
 
         # for reading out to object store
         self.avg_grad = self.individual_grads[0]
+        assert(len(self.avg_grad) == 314)
+        assert(len(self.avg_grad[0]) == 2)
+        assert(len(self.individual_grads) == num_devices)
+        assert(len(self.individual_grads[0]) == 314)
+        assert(len(self.individual_grads[0][0]) == 2)
 
         self.apply_op = tf.group(
             *[m.optimizer.apply_gradients(g) for g, m in zip(self.individual_grads, models)])
@@ -110,7 +123,6 @@ class SGDWorker(object):
         result = {}
         for device_grads in self.individual_grads:
             m = {device_grads[j][0]: grad for j, grad in enumerate(avg_grads)}
-            import ipdb; ipdb.set_trace()
             result.update(m)
         self.sess.run(self.apply_op, feed_dict=result)
 
@@ -140,20 +152,39 @@ def do_sgd_step(actors, skip_object_store):
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--skip-plasma", action="store_true")
-parser.add_argument("--gpus-per-actor", type=int, default=2)
-parser.add_argument("--num-actors", type=int, default=1)
+
+# Scaling
+parser.add_argument("--devices-per-actor", type=int, default=2,
+    help="Number of GPU/CPU towers to use per actor")
+parser.add_argument("--num-actors", type=int, default=1,
+    help="Number of actors to use for distributed sgd")
+
+# Debug
+parser.add_argument("--skip-plasma", action="store_true",
+    help="Whether to skip the object store for performance testing.")
+parser.add_argument("--use-cpus", action="store_true",
+    help="Whether to use CPU devices instead of GPU for debugging.")
+parser.add_argument("--batch-size", type=int, default=64,
+    help="ResNet101 batch size")
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
     ray.init()
     model = TFBenchModel
-    RemoteSGDWorker = ray.remote(num_gpus=args.gpus_per_actor)(SGDWorker)
+    if args.use_cpus:
+        requests = {"num_cpus": args.devices_per_actor}
+    else:
+        requests = {"num_gpus": args.devices_per_actor}
+    RemoteSGDWorker = ray.remote(**requests)(SGDWorker)
     actors = [
-        RemoteSGDWorker.remote(i, model, 'nccl', num_gpus=args.gpus_per_actor) for i in range(args.num_actors)]
+        RemoteSGDWorker.remote(
+            i, model, args.batch_size, args.use_cpus and "xring" or "nccl",
+            use_cpus=args.use_cpus, num_devices=args.devices_per_actor)
+        for i in range(args.num_actors)]
+    print("Test config: " + str(args))
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
         do_sgd_step(actors, args.skip_plasma)
-        print("Images per second", 64 * args.num_actors * args.gpus_per_actor / (time.time() - start))
+        print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
