@@ -63,6 +63,7 @@ class SGDWorker(object):
         elif all_reduce_alg:
            self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
+        self.device_grads = [zip(*dev_gv)[0] for dev_gv in self.device_grads_and_vars]
 
         assert(len(self.device_grads_and_vars) == num_devices)
         assert(len(self.device_grads_and_vars[0]) == 314)
@@ -91,7 +92,7 @@ class SGDWorker(object):
 
     def compute_gradients(self):
         fetches = self.sess.run(
-            [g for g, v in self.device_grads_and_vars],
+            self.device_grads,
             feed_dict=self.feed_dict())
         return fetches[0]
 
