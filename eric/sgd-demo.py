@@ -68,14 +68,15 @@ class SGDWorker(object):
                     model.grads = [t for t in model.optimizer.compute_gradients(model.loss) if t[0] is not None]
                     grad_ops.append(model.grads)
 
+        self.individual_grads = grad_ops
         self.models = models
         if num_gpus == 1:
            grad_ops = grad_ops[0] 
         elif all_reduce_alg:
-            grad_ops = allreduce.sum_gradients_all_reduce(
+           avg_grad_ops = allreduce.sum_gradients_all_reduce(
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_gpus)))
 
-        self.grad_op = grad_ops
+        self.avg_grad_op = avg_grad_ops
         self.apply_op = tf.group(
             *[m.optimizer.apply_gradients(m.grads) for m in models])
         self.sess.run(tf.global_variables_initializer())
@@ -91,23 +92,26 @@ class SGDWorker(object):
        # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
        # run_metadata = tf.RunMetadata()
        self.sess.run(self.apply_op, feed_dict=self.feed_dict(),)
-           options=run_options,
-           run_metadata=run_metadata)
+       #     options=run_options,
+       #     run_metadata=run_metadata)
        # trace = timeline.Timeline(step_stats=run_metadata.step_stats)
        # trace_file = open("/tmp/timeline-load.json", "w")
        # trace_file.write(trace.generate_chrome_trace_format())
 
     def compute_gradients(self):
-        l, g = self.sess.run(
-            [self.models[0].loss, [g[0] for g in self.grad_op]],
+        """avg"""
+        fetches = self.sess.run(
+            [self.models[0].loss] + [g[0] for g in self.avg_grad_op],
             feed_dict=self.feed_dict())
-        return l, g
+        return fetches[0], fetches[1:]
 
-    def apply_gradients(self, grads):
-        feed_dict = {
-            self.grad_op[i][0]: grads[i] for i in range(len(grads))
-        }
-        self.sess.run(self.apply_op, feed_dict=feed_dict)
+    def apply_gradients(self, avg_grads):
+        result = {}
+        for device_grads in self.individual_grads:
+            m = {device_grads[j][0]: grad for j, grad in enumerate(avg_grads)}
+            import ipdb; ipdb.set_trace()
+            result.update(m)
+        self.sess.run(self.apply_op, feed_dict=result)
 
 
 def average_gradients(grads):
@@ -135,19 +139,20 @@ def do_sgd_step(actors, skip_object_store):
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--skip_object_store", action="store_true")
-parser.add_argument("--gpus_per_actor", type=int, default=1)
-parser.add_argument("--num_actors", type=int, default=1)
+parser.add_argument("--skip-plasma", action="store_true")
+parser.add_argument("--gpus-per-actor", type=int, default=2)
+parser.add_argument("--num-actors", type=int, default=1)
 
 
 if __name__ == "__main__":
+    args = parser.parse_args()
     ray.init()
     model = TFBenchModel
     RemoteSGDWorker = ray.remote(num_gpus=args.gpus_per_actor)(SGDWorker)
     actors = [
-        RemoteSGDWorker.remote(i, model, 'nccl', num_gpus=gpus) for i in range(args.num_actors)]
+        RemoteSGDWorker.remote(i, model, 'nccl', num_gpus=args.gpus_per_actor) for i in range(args.num_actors)]
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.skip_object_store)
-        print("Images per second", 64 * n * gpus / (time.time() - start))
+        do_sgd_step(actors, args.skip_plasma)
+        print("Images per second", 64 * args.num_actors * args.gpus_per_actor / (time.time() - start))
