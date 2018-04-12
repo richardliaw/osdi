@@ -84,9 +84,9 @@ class SGDWorker(object):
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
 
         # for reading out to object store
-        self.avg_grad = self.individual_grads[0]
-        assert(len(self.avg_grad) == 314)
-        assert(len(self.avg_grad[0]) == 2)
+        # self.avg_grad = self.individual_grads[0]
+        # assert(len(self.avg_grad) == 314)
+        # assert(len(self.avg_grad[0]) == 2)
         assert(len(self.individual_grads) == num_devices)
         assert(len(self.individual_grads[0]) == 314)
         assert(len(self.individual_grads[0][0]) == 2)
@@ -115,9 +115,9 @@ class SGDWorker(object):
     def compute_gradients(self):
         """avg"""
         fetches = self.sess.run(
-            [g[0] for g in self.avg_grad],
+            self.individual_grads,
             feed_dict=self.feed_dict())
-        return fetches
+        return fetches[0]
 
     def apply_gradients(self, avg_grads):
         result = {}
