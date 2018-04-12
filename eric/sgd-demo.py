@@ -130,7 +130,7 @@ import argparse
 parser = argparse.ArgumentParser()
 
 # Scaling
-parser.add_argument("--devices-per-actor", type=int, default=2,
+parser.add_argument("--devices-per-actor", type=int, default=1,
     help="Number of GPU/CPU towers to use per actor")
 parser.add_argument("--num-actors", type=int, default=1,
     help="Number of actors to use for distributed sgd")
