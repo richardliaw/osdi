@@ -110,7 +110,6 @@ class SGDWorker(object):
         result = {}
         for device_grads in self.individual_grads:
             m = {device_grads[j][0]: grad for j, grad in enumerate(avg_grads)}
-            import ipdb; ipdb.set_trace()
             result.update(m)
         self.sess.run(self.apply_op, feed_dict=result)
 
