@@ -118,31 +118,36 @@ def average_gradients(grads):
 
 
 # TODO(ekl) replace with allreduce
+def do_sgd_step(actors, skip_object_store):
+    if skip_object_store:
+        ray.get([a.compute_apply.remote() for a in actors])
+    else:
+        grads = ray.get([a.compute_gradients.remote() for a in actors])
+        print("Avg loss", np.mean([l for (l, g) in grads]))
+        if len(actors) == 1:
+            avg_grad = grads[0][1]
+        else:
+            avg_grad = average_gradients([g for (l, g) in grads])
+        for a in actors:
+            a.apply_gradients.remote(avg_grad)
 
-def do_sgd_step(actors):
-    ray.get([a.compute_apply.remote() for a in actors])
-    # grads = ray.get([a.compute_gradients.remote() for a in actors])
-    # print("Avg loss", np.mean([l for (l, g) in grads]))
-    # avg_grad = average_gradients([g for (l, g) in grads])
-    # for a in actors:
-    #     a.apply_gradients.remote(avg_grad)
+
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--skip_object_store", action="store_true")
+parser.add_argument("--gpus_per_actor", type=int, default=1)
+parser.add_argument("--num_actors", type=int, default=1)
 
 
 if __name__ == "__main__":
     ray.init()
-    #worker = SGDWorker(0, TFBenchModel, 'nccl', 2)
-    #g = worker.compute_apply()
-
-    #import ipdb; ipdb.set_trace()
-
     model = TFBenchModel
-    n = 1
-    import sys
-    gpus = int(sys.argv[1])
-    RemoteSGDWorker = ray.remote(num_gpus=gpus)(SGDWorker)
-    actors = [RemoteSGDWorker.remote(i, model, 'nccl', num_gpus=gpus) for i in range(n)]
-    for i in range(5):
+    RemoteSGDWorker = ray.remote(num_gpus=args.gpus_per_actor)(SGDWorker)
+    actors = [
+        RemoteSGDWorker.remote(i, model, 'nccl', num_gpus=gpus) for i in range(args.num_actors)]
+    for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors)
+        do_sgd_step(actors, args.skip_object_store)
         print("Images per second", 64 * n * gpus / (time.time() - start))
