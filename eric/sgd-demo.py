@@ -90,10 +90,11 @@ class SGDWorker(object):
        # trace_file.write(trace.generate_chrome_trace_format())
 
     def compute_gradients(self):
+        tf.control_dependencies[self.device_grads_and_vars]
         fetches = self.sess.run(
-            self.device_grads_and_vars,
+            [g for g, v in self.device_grads_and_vars],
             feed_dict=self.feed_dict())
-        return [g for g, v in fetches[0]]
+        return fetches[0]
 
     def apply_gradients(self, avg_grads):
         result = {}
