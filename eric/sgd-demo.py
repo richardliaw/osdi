@@ -101,9 +101,9 @@ class SGDWorker(object):
     def compute_gradients(self):
         """avg"""
         fetches = self.sess.run(
-            [self.models[0].loss] + [g[0] for g in self.avg_grad_op],
+            [g[0] for g in self.avg_grad_op],
             feed_dict=self.feed_dict())
-        return fetches[0], fetches[1:]
+        return fetches
 
     def apply_gradients(self, avg_grads):
         result = {}
@@ -127,11 +127,11 @@ def do_sgd_step(actors, skip_object_store):
         ray.get([a.compute_apply.remote() for a in actors])
     else:
         grads = ray.get([a.compute_gradients.remote() for a in actors])
-        print("Avg loss", np.mean([l for (l, g) in grads]))
         if len(actors) == 1:
-            avg_grad = grads[0][1]
+            assert len(grads) == 1
+            avg_grad = grads[0]
         else:
-            avg_grad = average_gradients([g for (l, g) in grads])
+            avg_grad = average_gradients(grads)
         for a in actors:
             a.apply_gradients.remote(avg_grad)
 
