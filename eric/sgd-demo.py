@@ -71,7 +71,7 @@ class SGDWorker(object):
         self.individual_grads = grad_ops
         self.models = models
         if num_gpus == 1:
-           grad_ops = grad_ops[0] 
+           avg_grad_ops = grad_ops[0] 
         elif all_reduce_alg:
            avg_grad_ops = allreduce.sum_gradients_all_reduce(
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_gpus)))
