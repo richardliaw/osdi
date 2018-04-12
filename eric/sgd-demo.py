@@ -10,23 +10,9 @@ import ray
 import time
 
 
-class SimpleModel(object):
-    def __init__(self):
-        self.inputs = tf.placeholder(shape=[None, 4], dtype=tf.float32)
-        self.labels = tf.placeholder(shape=[None, 2], dtype=tf.float32)
-        prediction = slim.fully_connected(
-            self.inputs, 1, scope="layer1")
-        self.loss = tf.reduce_mean(
-            tf.squared_difference(prediction, self.labels))
-
-    def feed_dict(self):
-        return {
-            self.inputs: np.ones((32, 4)),
-            self.labels: np.zeros((32, 2)),
-        }
-
 class MockDataset():
     name = "synthetic"
+
 
 class TFBenchModel(object):
     def __init__(self, batch=64):
@@ -44,11 +30,6 @@ class TFBenchModel(object):
             self.inputs: np.zeros(self.inputs.shape.as_list()),
             self.labels: np.zeros(self.labels.shape.as_list())
         }
-# import ipdb
-# from tensorflow.python.client import timeline
-# def debug():
-#     return ipdb.set_trace(context=5)
-
 
 
 class SGDWorker(object):
@@ -113,11 +94,10 @@ class SGDWorker(object):
        # trace_file.write(trace.generate_chrome_trace_format())
 
     def compute_gradients(self):
-        """avg"""
         fetches = self.sess.run(
             self.individual_grads,
             feed_dict=self.feed_dict())
-        return fetches[0]
+        return [g for g, v in fetches[0]]
 
     def apply_gradients(self, avg_grads):
         result = {}
@@ -134,9 +114,8 @@ def average_gradients(grads):
     return out
 
 
-# TODO(ekl) replace with allreduce
-def do_sgd_step(actors, skip_object_store):
-    if skip_object_store:
+def do_sgd_step(actors, local_only):
+    if local_only:
         ray.get([a.compute_apply.remote() for a in actors])
     else:
         grads = ray.get([a.compute_gradients.remote() for a in actors])
@@ -144,6 +123,7 @@ def do_sgd_step(actors, skip_object_store):
             assert len(grads) == 1
             avg_grad = grads[0]
         else:
+            # TODO(ekl) replace with allreduce
             avg_grad = average_gradients(grads)
         for a in actors:
             a.apply_gradients.remote(avg_grad)
@@ -160,7 +140,7 @@ parser.add_argument("--num-actors", type=int, default=1,
     help="Number of actors to use for distributed sgd")
 
 # Debug
-parser.add_argument("--skip-plasma", action="store_true",
+parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
@@ -186,5 +166,5 @@ if __name__ == "__main__":
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.skip_plasma)
+        do_sgd_step(actors, args.local_only)
         print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
