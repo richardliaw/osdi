@@ -102,7 +102,7 @@ class SGDWorker(object):
     def compute_gradients(self):
         """avg"""
         fetches = self.sess.run(
-            [g[0] for g in self.avg_grad_op],
+            [g[0] for g in self.avg_grad],
             feed_dict=self.feed_dict())
         return fetches
 
