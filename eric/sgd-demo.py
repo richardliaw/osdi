@@ -123,7 +123,6 @@ class SGDWorker(object):
         return tower_avg
 
     def apply_gradients(self, avg_grads):
-        import ipdb; ipdb.set_trace()
         result = {}
         for device_grads in self.tower_grads:
             m = {device_grads[j]: grad for j, grad in enumerate(avg_grads)}
