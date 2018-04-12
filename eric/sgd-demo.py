@@ -68,17 +68,18 @@ class SGDWorker(object):
                     model.grads = [t for t in model.optimizer.compute_gradients(model.loss) if t[0] is not None]
                     grad_ops.append(model.grads)
 
-        self.individual_grads = grad_ops
         self.models = models
         if num_gpus == 1:
-           avg_grad_ops = grad_ops[0] 
+           self.individual_grads = grad_ops
         elif all_reduce_alg:
-           avg_grad_ops = allreduce.sum_gradients_all_reduce(
+           self.individual_grads = allreduce.sum_gradients_all_reduce(
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_gpus)))
 
-        self.avg_grad_op = avg_grad_ops
+        # for reading out to object store
+        self.avg_grad = self.individual_grads[0]
+
         self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(m.grads) for m in models])
+            *[m.optimizer.apply_gradients(g) for g, m in zip(self.individual_grads, models)])
         self.sess.run(tf.global_variables_initializer())
 
     def feed_dict(self):
