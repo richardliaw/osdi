@@ -78,21 +78,22 @@ class SGDWorker(object):
 
         self.models = models
         if num_devices == 1:
-           self.individual_grads = grad_ops
+           self.tower_gradvars = grad_ops
         elif all_reduce_alg:
-           self.individual_grads = allreduce.sum_gradients_all_reduce(
+           self.tower_gradvars = allreduce.sum_gradients_all_reduce(
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
 
         # for reading out to object store
         # self.avg_grad = self.individual_grads[0]
         # assert(len(self.avg_grad) == 314)
         # assert(len(self.avg_grad[0]) == 2)
-        assert(len(self.individual_grads) == num_devices)
-        assert(len(self.individual_grads[0]) == 314)
-        assert(len(self.individual_grads[0][0]) == 2)
+        assert(len(self.tower_gradvars) == num_devices)
+        assert(len(self.tower_gradvars[0]) == 314)
+        assert(len(self.tower_gradvars[0][0]) == 2)
+        self.tower_grads = [zip(*tower_gv)[0] for tower_gv in self.tower_gradvars]
 
         self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(g) for g, m in zip(self.individual_grads, models)])
+            *[m.optimizer.apply_gradients(gv) for gv, m in zip(self.tower_gradvars, models)])
         self.sess.run(tf.global_variables_initializer())
 
     def feed_dict(self):
@@ -115,14 +116,17 @@ class SGDWorker(object):
     def compute_gradients(self):
         """avg"""
         fetches = self.sess.run(
-            self.individual_grads,
+            self.tower_grads,
             feed_dict=self.feed_dict())
-        return fetches[0]
+        # assert all fetches should be same
+        tower_avg = fetches[0]  
+        return tower_avg
 
     def apply_gradients(self, avg_grads):
+        import ipdb; ipdb.set_trace()
         result = {}
-        for device_grads in self.individual_grads:
-            m = {device_grads[j][0]: grad for j, grad in enumerate(avg_grads)}
+        for device_grads in self.tower_grads:
+            m = {device_grads[j]: grad for j, grad in enumerate(avg_grads)}
             result.update(m)
         self.sess.run(self.apply_op, feed_dict=result)
 
