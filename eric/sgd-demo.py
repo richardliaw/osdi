@@ -59,21 +59,17 @@ class SGDWorker(object):
 
         self.models = models
         if num_devices == 1:
-           self.individual_grads = grad_ops
+           self.device_grads_and_vars = grad_ops
         elif all_reduce_alg:
-           self.individual_grads = allreduce.sum_gradients_all_reduce(
+           self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
                 "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
 
-        # for reading out to object store
-        # self.avg_grad = self.individual_grads[0]
-        # assert(len(self.avg_grad) == 314)
-        # assert(len(self.avg_grad[0]) == 2)
-        assert(len(self.individual_grads) == num_devices)
-        assert(len(self.individual_grads[0]) == 314)
-        assert(len(self.individual_grads[0][0]) == 2)
+        assert(len(self.device_grads_and_vars) == num_devices)
+        assert(len(self.device_grads_and_vars[0]) == 314)
+        assert(len(self.device_grads_and_vars[0][0]) == 2)
 
         self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(g) for g, m in zip(self.individual_grads, models)])
+            *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
         self.sess.run(tf.global_variables_initializer())
 
     def feed_dict(self):
@@ -86,7 +82,7 @@ class SGDWorker(object):
        # import os
        # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
        # run_metadata = tf.RunMetadata()
-       self.sess.run(self.apply_op, feed_dict=self.feed_dict(),)
+       self.sess.run(self.apply_op, feed_dict=self.feed_dict())
        #     options=run_options,
        #     run_metadata=run_metadata)
        # trace = timeline.Timeline(step_stats=run_metadata.step_stats)
@@ -95,14 +91,14 @@ class SGDWorker(object):
 
     def compute_gradients(self):
         fetches = self.sess.run(
-            self.individual_grads,
+            self.device_grads_and_vars,
             feed_dict=self.feed_dict())
         return [g for g, v in fetches[0]]
 
     def apply_gradients(self, avg_grads):
         result = {}
-        for device_grads in self.individual_grads:
-            m = {device_grads[j][0]: grad for j, grad in enumerate(avg_grads)}
+        for device_grads_and_vars in self.device_grads_and_vars:
+            m = {device_grads_and_vars[j][0]: grad for j, grad in enumerate(avg_grads)}
             result.update(m)
         self.sess.run(self.apply_op, feed_dict=result)
 
