@@ -7,7 +7,9 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
+import os
 import ray
 import time
 
@@ -99,16 +101,20 @@ class SGDWorker(object):
             result.update(m.feed_dict())
         return result 
 
-    def compute_apply(self):
-       # import os
-       # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-       # run_metadata = tf.RunMetadata()
-       self.sess.run(self.apply_op, feed_dict=self.feed_dict())
-       #     options=run_options,
-       #     run_metadata=run_metadata)
-       # trace = timeline.Timeline(step_stats=run_metadata.step_stats)
-       # trace_file = open("/tmp/timeline-load.json", "w")
-       # trace_file.write(trace.generate_chrome_trace_format())
+    def compute_apply(self, write_timeline):
+       if write_timeline:
+           run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+           run_metadata = tf.RunMetadata()
+           self.sess.run(self.apply_op, feed_dict=self.feed_dict(),
+               options=run_options,
+               run_metadata=run_metadata)
+           trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+           outf = "timeline-sgd.json"
+           trace_file = open(outf, "w")
+           print("wrote tf timeline to", os.path.abspath(outf))
+           trace_file.write(trace.generate_chrome_trace_format())
+       else:
+          self.sess.run(self.apply_op, feed_dict=self.feed_dict())
 
     def compute_gradients(self):
         fetches = self.sess.run(
@@ -131,9 +137,9 @@ def average_gradients(grads):
     return out
 
 
-def do_sgd_step(actors, local_only):
+def do_sgd_step(actors, local_only, write_timeline):
     if local_only:
-        ray.get([a.compute_apply.remote() for a in actors])
+        ray.get([a.compute_apply.remote(write_timeline) for a in actors])
     else:
         grads = ray.get([a.compute_gradients.remote() for a in actors])
         if len(actors) == 1:
@@ -157,6 +163,8 @@ parser.add_argument("--num-actors", type=int, default=1,
     help="Number of actors to use for distributed sgd")
 
 # Debug
+parser.add_argument("--timeline", action="store_true",
+    help="Whether to write out a TF timeline")
 parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
@@ -168,6 +176,8 @@ parser.add_argument("--batch-size", type=int, default=64,
 if __name__ == "__main__":
     args = parser.parse_args()
     ray.init()
+    if args.timeline:
+        assert args.local_only
     model = TFBenchModel
     if args.use_cpus:
         requests = {"num_cpus": args.devices_per_actor}
@@ -183,5 +193,5 @@ if __name__ == "__main__":
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.local_only)
+        do_sgd_step(actors, args.local_only, args.timeline)
         print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
