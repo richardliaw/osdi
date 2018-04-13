@@ -171,6 +171,8 @@ parser.add_argument("--timeline", action="store_true",
     help="Whether to write out a TF timeline")
 parser.add_argument("--verbose", action="store_true",
     help="Whether to print out timing debug messages")
+parser.add_argument("--warmup", action="store_true",
+    help="Whether to warmup the object store first")
 parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
@@ -181,9 +183,27 @@ parser.add_argument("--allreduce-spec", type=str, default="",
     help="Allreduce spec")
 
 
+def warmup():
+    print("Warming up object store")
+    zeros = np.zeros(int(100e6 / 8), dtype=np.float64)
+    start = time.time()
+    for _ in range(10):
+        ray.put(zeros)
+    print("Initial latency for 100MB put", (time.time() - start) / 10)
+    for _ in range(10):
+        for _ in range(100):
+            ray.put(zeros)
+        start = time.time()
+        for _ in range(10):
+            ray.put(zeros)
+        print("Warming up latency for 100MB put", (time.time() - start) / 10)
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
     ray.init()
+    if args.warmup:
+        warmup()
     if args.timeline:
         assert args.local_only
     model = TFBenchModel
