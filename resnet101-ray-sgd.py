@@ -190,6 +190,8 @@ parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
+parser.add_argument("--max-bytes", type=int, default=0,
+    help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
 parser.add_argument("--allreduce-spec", type=str, default="",
@@ -216,7 +218,8 @@ if __name__ == "__main__":
     actors = [
         RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
-            use_cpus=args.use_cpus, num_devices=args.devices_per_actor)
+            use_cpus=args.use_cpus, num_devices=args.devices_per_actor, 
+            max_bytes=args.max_bytes)
         for i in range(args.num_actors)]
     print("Test config: " + str(args))
     for i in range(10):

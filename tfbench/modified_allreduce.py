@@ -24,6 +24,7 @@ import tensorflow as tf
 
 from tensorflow.contrib import nccl
 from tensorflow.contrib.all_reduce.python import all_reduce
+from allreduce import *
 
 
 def sum_gradients_all_reduce(dev_prefixes,
