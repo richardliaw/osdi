@@ -173,6 +173,8 @@ parser.add_argument("--verbose", action="store_true",
     help="Whether to print out timing debug messages")
 parser.add_argument("--warmup", action="store_true",
     help="Whether to warmup the object store first")
+parser.add_argument("--hugepages", action="store_true",
+    help="Whether to use hugepages")
 parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
@@ -201,7 +203,10 @@ def warmup():
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    ray.init()
+    if args.hugepages:
+        ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/")
+    else:
+        ray.init()
     if args.warmup:
         warmup()
     if args.timeline:
