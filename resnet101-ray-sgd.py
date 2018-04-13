@@ -49,7 +49,14 @@ class TFBenchModel(object):
 
 
 class SGDWorker(object):
-    def __init__(self, i, model_cls, batch_size, all_reduce_alg=None, num_devices=1, use_cpus=False):
+    def __init__(self,
+                 i,
+                 model_cls,
+                 batch_size,
+                 all_reduce_alg=None,
+                 num_devices=1,
+                 use_cpus=False,
+                 max_bytes=0):
         # TODO - just port VariableMgrLocalReplicated
         self.i = i
         assert num_devices > 0
@@ -79,16 +86,25 @@ class SGDWorker(object):
         if num_devices == 1:
            self.device_grads_and_vars = grad_ops
         elif all_reduce_alg:
-           self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
-                "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
+            if max_bytes:
+                from tfbench import modified_allreduce
+                self.device_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
+                    "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)), agg_small_grads_max_bytes=max_bytes)
+            else:
+                self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
+                    "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
+                assert(len(self.device_grads_and_vars) == num_devices)
+                assert(len(self.device_grads_and_vars[0]) == 314)
+                assert(len(self.device_grads_and_vars[0][0]) == 2)
         self.device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.device_grads_and_vars]
 
-        assert(len(self.device_grads_and_vars) == num_devices)
-        assert(len(self.device_grads_and_vars[0]) == 314)
-        assert(len(self.device_grads_and_vars[0][0]) == 2)
-
-        self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
+        if max_bytes:
+            self.unpacked_gv = allreduce.unpack_small_tensors(self.device_grads_and_vars, packing_vals)
+            self.apply_op = tf.group(
+                *[m.optimizer.apply_gradients(g) for g, m in zip(self.unpacked_gv, models)])
+        else:
+            self.apply_op = tf.group(
+                *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
         self.sess.run(init_op)
@@ -179,6 +195,8 @@ parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
+parser.add_argument("--max-bytes", type=int, default=0,
+    help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
 parser.add_argument("--allreduce-spec", type=str, default="",
@@ -226,7 +244,8 @@ if __name__ == "__main__":
     actors = [
         RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
-            use_cpus=args.use_cpus, num_devices=args.devices_per_actor)
+            use_cpus=args.use_cpus, num_devices=args.devices_per_actor, 
+            max_bytes=args.max_bytes)
         for i in range(args.num_actors)]
     print("Test config: " + str(args))
     for i in range(10):
