@@ -161,8 +161,7 @@ def do_sgd_step(actors, local_only, write_timeline, verbose):
         if verbose:
             print("distributed allreduce time", time.time() - start)
         start = time.time()
-        for a in actors:
-            a.apply_gradients.remote(avg_grad, verbose)
+        ray.get([a.apply_gradients.remote(avg_grad, verbose) for a in actors])
         if verbose:
             print("apply all grads time", time.time() - start)
 
