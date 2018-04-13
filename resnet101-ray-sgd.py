@@ -86,7 +86,7 @@ class SGDWorker(object):
         if num_devices == 1:
            self.device_grads_and_vars = grad_ops
         elif all_reduce_alg:
-            if packed:
+            if max_bytes:
                 self.device_grads_and_vars, packing_vals = allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)), agg_small_grads_max_bytes=max_bytes)
             else:
@@ -97,7 +97,7 @@ class SGDWorker(object):
                 assert(len(self.device_grads_and_vars[0][0]) == 2)
         self.device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.device_grads_and_vars]
 
-        if packed:
+        if max_bytes:
             self.unpacked_gv = allreduce.unpack_small_tensors(self.device_grads_and_vars, packing_vals)
             self.apply_op = tf.group(
                 *[m.optimizer.apply_gradients(g) for g, m in zip(self.unpacked_gv, models)])
