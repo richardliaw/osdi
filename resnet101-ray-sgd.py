@@ -47,12 +47,6 @@ class TFBenchModel(object):
         self.loss = tf.reduce_mean(loss, name='xentropy-loss')
         self.optimizer = tf.train.GradientDescentOptimizer(1e-6)
 
-    def feed_dict(self):
-        return {
-            self.inputs: np.zeros(self.inputs.shape.as_list()),
-            self.labels: np.zeros(self.labels.shape.as_list())
-        }
-
 
 class SGDWorker(object):
     def __init__(self,
@@ -83,7 +77,9 @@ class SGDWorker(object):
                 with tf.variable_scope("device_%d" % device_idx):
                     model = model_cls(batch=batch_size)
                     models += [model]
-                    model.grads = [t for t in model.optimizer.compute_gradients(model.loss) if t[0] is not None]
+                    model.grads = [
+                        t for t in model.optimizer.compute_gradients(model.loss)
+                        if t[0] is not None]
                     grad_ops.append(model.grads)
 
         self.models = models
@@ -101,7 +97,6 @@ class SGDWorker(object):
                 assert(len(self.device_grads_and_vars[0][0]) == 2)
         self.device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.device_grads_and_vars]
 
-
         if packed:
             self.unpacked_gv = allreduce.unpack_small_tensors(self.device_grads_and_vars, packing_vals)
             self.apply_op = tf.group(
@@ -109,19 +104,15 @@ class SGDWorker(object):
         else:
             self.apply_op = tf.group(
                 *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
-        self.sess.run(tf.global_variables_initializer())
-
-    def feed_dict(self):
-        result = {}
-        for m in self.models:
-            result.update(m.feed_dict())
-        return result
+        init_op = tf.group(tf.global_variables_initializer(),
+                           tf.local_variables_initializer())
+        self.sess.run(init_op)
 
     def compute_apply(self, write_timeline):
        if write_timeline:
            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
            run_metadata = tf.RunMetadata()
-           self.sess.run(self.apply_op, feed_dict=self.feed_dict(),
+           self.sess.run(self.apply_op,
                options=run_options,
                run_metadata=run_metadata)
            trace = timeline.Timeline(step_stats=run_metadata.step_stats)
@@ -130,13 +121,11 @@ class SGDWorker(object):
            print("wrote tf timeline to", os.path.abspath(outf))
            trace_file.write(trace.generate_chrome_trace_format())
        else:
-          self.sess.run(self.apply_op, feed_dict=self.feed_dict())
+          self.sess.run(self.apply_op)
 
     def compute_gradients(self, verbose):
         start = time.time()
-        fetches = self.sess.run(
-            self.device_grads,
-            feed_dict=self.feed_dict())
+        fetches = self.sess.run(self.device_grads)
         if verbose:
             print("compute grad interior time", time.time() - start)
         return fetches[0]
