@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.python.client import timeline
-from tfbench import model_config, allreduce
+from tfbench import model_config, modified_allreduce as allreduce #allreduce
 import os
 import ray
 import time
@@ -55,7 +55,14 @@ class TFBenchModel(object):
 
 
 class SGDWorker(object):
-    def __init__(self, i, model_cls, batch_size, all_reduce_alg=None, num_devices=1, use_cpus=False):
+    def __init__(self,
+                 i,
+                 model_cls,
+                 batch_size,
+                 all_reduce_alg=None,
+                 num_devices=1,
+                 use_cpus=False,
+                 max_bytes=0):
         # TODO - just port VariableMgrLocalReplicated
         self.i = i
         assert num_devices > 0
@@ -83,23 +90,32 @@ class SGDWorker(object):
         if num_devices == 1:
            self.device_grads_and_vars = grad_ops
         elif all_reduce_alg:
-           self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
-                "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
+            if packed:
+                self.device_grads_and_vars, packing_vals = allreduce.sum_gradients_all_reduce(
+                    "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)), agg_small_grads_max_bytes=max_bytes)
+            else:
+                self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
+                    "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
+                assert(len(self.device_grads_and_vars) == num_devices)
+                assert(len(self.device_grads_and_vars[0]) == 314)
+                assert(len(self.device_grads_and_vars[0][0]) == 2)
         self.device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.device_grads_and_vars]
 
-        assert(len(self.device_grads_and_vars) == num_devices)
-        assert(len(self.device_grads_and_vars[0]) == 314)
-        assert(len(self.device_grads_and_vars[0][0]) == 2)
 
-        self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
+        if packed:
+            self.unpacked_gv = allreduce.unpack_small_tensors(self.device_grads_and_vars, packing_vals)
+            self.apply_op = tf.group(
+                *[m.optimizer.apply_gradients(g) for g, m in zip(self.unpacked_gv, models)])
+        else:
+            self.apply_op = tf.group(
+                *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
         self.sess.run(tf.global_variables_initializer())
 
     def feed_dict(self):
         result = {}
         for m in self.models:
             result.update(m.feed_dict())
-        return result 
+        return result
 
     def compute_apply(self, write_timeline):
        if write_timeline:
