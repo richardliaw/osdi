@@ -116,18 +116,24 @@ class SGDWorker(object):
        else:
           self.sess.run(self.apply_op, feed_dict=self.feed_dict())
 
-    def compute_gradients(self):
+    def compute_gradients(self, verbose):
+        start = time.time()
         fetches = self.sess.run(
             self.device_grads,
             feed_dict=self.feed_dict())
+        if verbose:
+            print("compute grad interior time", time.time() - start)
         return fetches[0]
 
-    def apply_gradients(self, avg_grads):
+    def apply_gradients(self, avg_grads, verbose):
+        start = time.time()
         result = {}
         for device_grads_and_vars in self.device_grads_and_vars:
             m = {device_grads_and_vars[j][0]: grad for j, grad in enumerate(avg_grads)}
             result.update(m)
         self.sess.run(self.apply_op, feed_dict=result)
+        if verbose:
+            print("apply grad interior time", time.time() - start)
 
 
 def average_gradients(grads):
@@ -137,19 +143,28 @@ def average_gradients(grads):
     return out
 
 
-def do_sgd_step(actors, local_only, write_timeline):
+def do_sgd_step(actors, local_only, write_timeline, verbose):
     if local_only:
         ray.get([a.compute_apply.remote(write_timeline) for a in actors])
     else:
-        grads = ray.get([a.compute_gradients.remote() for a in actors])
+        start = time.time()
+        grads = ray.get([a.compute_gradients.remote(verbose) for a in actors])
+        if verbose:
+            print("compute all grads time", time.time() - start)
+        start = time.time()
         if len(actors) == 1:
             assert len(grads) == 1
             avg_grad = grads[0]
         else:
             # TODO(ekl) replace with allreduce
             avg_grad = average_gradients(grads)
+        if verbose:
+            print("distributed allreduce time", time.time() - start)
+        start = time.time()
         for a in actors:
-            a.apply_gradients.remote(avg_grad)
+            a.apply_gradients.remote(avg_grad, verbose)
+        if verbose:
+            print("apply all grads time", time.time() - start)
 
 
 import argparse
@@ -165,6 +180,8 @@ parser.add_argument("--num-actors", type=int, default=1,
 # Debug
 parser.add_argument("--timeline", action="store_true",
     help="Whether to write out a TF timeline")
+parser.add_argument("--verbose", action="store_true",
+    help="Whether to print out timing debug messages")
 parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--use-cpus", action="store_true",
@@ -201,5 +218,5 @@ if __name__ == "__main__":
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.local_only, args.timeline)
+        do_sgd_step(actors, args.local_only, args.timeline, args.verbose)
         print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
