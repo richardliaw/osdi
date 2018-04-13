@@ -171,6 +171,8 @@ parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
+parser.add_argument("--allreduce-spec", type=str, default="",
+    help="Allreduce spec")
 
 
 if __name__ == "__main__":
@@ -184,9 +186,15 @@ if __name__ == "__main__":
     else:
         requests = {"num_gpus": args.devices_per_actor}
     RemoteSGDWorker = ray.remote(**requests)(SGDWorker)
+    if args.use_cpus:
+        spec = "xring"
+    else:
+        spec = "nccl"
+    if args.allreduce_spec:
+        spec = args.allreduce_spec
     actors = [
         RemoteSGDWorker.remote(
-            i, model, args.batch_size, args.use_cpus and "xring" or "nccl",
+            i, model, args.batch_size, spec,
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor)
         for i in range(args.num_actors)]
     print("Test config: " + str(args))
