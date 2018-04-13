@@ -20,7 +20,7 @@ class MockDataset():
 
 class TFBenchModel(object):
     def __init__(self, batch=64):
-        image_shape = [batch, 224, 224, 3]
+        image_shape = [batch, 3, 224, 224]
         labels_shape = [batch]
 
         # Synthetic image should be within [0, 255].
@@ -42,7 +42,7 @@ class TFBenchModel(object):
             name='synthetic_labels')
 
         self.model = model_config.get_model_config("resnet101", MockDataset())
-        logits, aux = self.model.build_network(self.inputs, data_format="NHWC")
+        logits, aux = self.model.build_network(self.inputs, data_format="NCHW")
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=self.labels)
         self.loss = tf.reduce_mean(loss, name='xentropy-loss')
         self.optimizer = tf.train.GradientDescentOptimizer(1e-6)
