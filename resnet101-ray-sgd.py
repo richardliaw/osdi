@@ -89,7 +89,7 @@ class SGDWorker(object):
 
         self.apply_op = tf.group(
             *[m.optimizer.apply_gradients(g) for g, m in zip(self.device_grads_and_vars, models)])
-        self.sess.run(tf.global_variables_initializer())
+        self.sess.run(tf.initialize_all_variables())
 
     def compute_apply(self, write_timeline):
        if write_timeline:
