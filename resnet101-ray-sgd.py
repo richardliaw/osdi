@@ -20,7 +20,7 @@ class MockDataset():
 
 class TFBenchModel(object):
     def __init__(self, batch=64):
-        image_shape = [batch, 3, 224, 224]
+        image_shape = [batch, 224, 224, 3]
         labels_shape = [batch]
 
         # Synthetic image should be within [0, 255].
