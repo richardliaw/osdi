@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.python.client import timeline
-from tfbench import model_config, modified_allreduce as allreduce #allreduce
+from tfbench import model_config, allreduce
 import os
 import ray
 import time
@@ -87,7 +87,8 @@ class SGDWorker(object):
            self.device_grads_and_vars = grad_ops
         elif all_reduce_alg:
             if max_bytes:
-                self.device_grads_and_vars, packing_vals = allreduce.sum_gradients_all_reduce(
+                from tfbench import modified_allreduce
+                self.device_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)), agg_small_grads_max_bytes=max_bytes)
             else:
                 self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
