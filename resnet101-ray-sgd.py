@@ -89,7 +89,9 @@ class SGDWorker(object):
             if max_bytes:
                 from tfbench import modified_allreduce
                 self.device_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
-                    "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)), agg_small_grads_max_bytes=max_bytes)
+                    "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)),
+                    agg_small_grads_max_bytes=max_bytes,
+                    agg_small_grads_max_group=9999)
             else:
                 self.device_grads_and_vars = allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
