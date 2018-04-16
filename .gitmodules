@@ -1,0 +1,3 @@
+[submodule "memcpy_plasma_op"]
+	path = memcpy_plasma_op
+	url = git@github.com:concretevitamin/memcpy_plasma_op.git
