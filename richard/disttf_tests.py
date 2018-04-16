@@ -31,6 +31,7 @@ def build_ps_cmd(kwargs):
 
 
 def dist_replicated_cmd_builder(hosts, kwargs):
+    kwargs = kwargs.copy()
     def generate_host_flags():
         cmds = {}
         cmds["ps_hosts"] = ",".join([h + ":50000" for h in hosts])
@@ -64,9 +65,10 @@ def build_controller_cmd(kwargs):
 
 
 def dist_allreduce_cmd_builder(hosts, kwargs):
+    kwargs = kwargs.copy()
     def generate_host_flags():
         cmds = {}
-        cmds["ps_hosts"] = ",".join([h + ":50000" for h in hosts])
+        cmds["worker_hosts"] = ",".join([h + ":50000" for h in hosts])
         cmds["controller_host"] = [h + ":50001" for h in hosts][0]
         return cmds
     host_flags = generate_host_flags()
@@ -99,3 +101,12 @@ if __name__ == '__main__':
         'variable_update': 'distributed_replicated',
     }
     dist_replicated_cmd_builder(hosts, args)
+
+    args = {
+        'batch_size': '64',
+        'local_parameter_device': 'gpu',
+        'model': 'resnet101',
+        'num_gpus': '8',
+        'variable_update': 'distributed_all_reduce',
+    }
+    dist_allreduce_cmd_builder(hosts, args)
