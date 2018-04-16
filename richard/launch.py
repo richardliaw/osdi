@@ -30,22 +30,27 @@ class Runner(object):
         print("getting hostname")
         return ray.services.get_node_ip_address()
 
+    def cleanup(self):
+        return subprocess.check_output(["bash", "cleanup.sh"])
+
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--num", type=int, default=1)
+    parser.add_argument("--num-ps", type=int, default=None)
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--var-update", type=str, default='distributed_replicated')
-    parser.add_argument("--remote", action='store_true')
+    parser.add_argument("--remote", type=bool, default=True)
     parsed_args = parser.parse_args()
 
     if parsed_args.remote:
         ray.init(redis_address=(ray.services.get_node_ip_address() + ":6379"), redirect_output=False)
     else:
-        ray.init(num_gpus=parsed_args.num)
+        ray.init(num_gpus=parsed_args.num * 8)
     runners = [Runner.remote() for i in range(parsed_args.num)]
     hosts = ray.get([r.get_hostname.remote() for r in runners])
+    ray.get([r.cleanup.remote() for r in runners])
     host_to_runner = dict(zip(hosts, runners))
     tf_args = {
         'batch_size': str(parsed_args.batch),
@@ -55,14 +60,16 @@ if __name__ == '__main__':
         'variable_update': parsed_args.var_update,
     }
     if parsed_args.var_update == "distributed_replicated":
-        host_cmds = dist_replicated_cmd_builder(hosts, tf_args)
+        host_cmds = dist_replicated_cmd_builder(hosts, tf_args, parsed_args.num_ps)
         for host, (ps_cmd, worker_cmd) in host_cmds.items():
             runner = host_to_runner[host]
+            if not ps_cmd: 
+                continue
             print("Launching ps for {}...".format(host))
             runner.run_cmd.remote(ps_cmd + " > ~/ps.out 2>&1", env_vars={"CUDA_VISIBLE_DEVICES": ""})
             print(ps_cmd)
 
-        time.sleep(10)
+        time.sleep(1)
 
         for host, (ps_cmd, worker_cmd) in host_cmds.items():
             runner = host_to_runner[host]
