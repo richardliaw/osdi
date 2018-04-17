@@ -179,7 +179,7 @@ class SGDWorker(object):
         self.sess.run(init_op)
 
     def compute_apply(self, write_timeline):
-        run_timeline(sess, self.apply_op, write_timeline, timeline="compute_apply")
+        run_timeline(sess, self.apply_op, write_timeline=write_timeline, timeline="compute_apply")
 
     def compute_gradients(self, verbose):
         start = time.time()
