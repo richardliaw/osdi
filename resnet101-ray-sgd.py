@@ -57,13 +57,14 @@ class SGDWorker(object):
                  num_devices=1,
                  use_cpus=False,
                  max_bytes=0,
-                 plasma_op=False):
+                 plasma_op=False,
+                 verbose=False):
         # TODO - just port VariableMgrLocalReplicated
         self.i = i
         assert num_devices > 0
         tf_session_args = {
             "device_count": {"CPU": num_devices},
-            "log_device_placement": True,
+            "log_device_placement": verbose,
         }
         config_proto = tf.ConfigProto(**tf_session_args)
         self.sess = tf.Session(config=config_proto)
@@ -318,7 +319,8 @@ if __name__ == "__main__":
         RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor, 
-            max_bytes=args.max_bytes, plasma_op=args.plasma_op)
+            max_bytes=args.max_bytes, plasma_op=args.plasma_op,
+            verbose=args.verbose)
         for i in range(args.num_actors)]
     print("Test config: " + str(args))
     for i in range(10):
