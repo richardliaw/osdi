@@ -313,8 +313,6 @@ if __name__ == "__main__":
         ray.init()
     if args.warmup:
         warmup()
-    if args.timeline:
-        assert args.local_only
     model = TFBenchModel
     if args.use_cpus:
         requests = {"num_cpus": args.devices_per_actor}
