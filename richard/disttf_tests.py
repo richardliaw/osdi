@@ -10,9 +10,6 @@ def get_private_ip(host):
     cmd = "hostname"
     res = ssh_cmd(["ssh", "-i NEW.pem", "ubuntu@{host}", "bash -c '{}'"])
 
-
-
-
 def build_worker_cmd(kwargs):
     kwargs = copy.deepcopy(kwargs)
     kwargs.update({"job_name": "worker"})
@@ -30,11 +27,19 @@ def build_ps_cmd(kwargs):
     return " ".join(root)
 
 
-def dist_replicated_cmd_builder(hosts, kwargs):
+def dist_replicated_cmd_builder(hosts, kwargs, num_ps=None):
+    """
+    Args:
+        hosts: List of hosts
+        num_ps: Defaults to number of hosts.
+        kwargs: Args used to build command
+    """
+    num_ps = num_ps or len(hosts)
+    ps_hosts = hosts[:num_ps]
     kwargs = kwargs.copy()
     def generate_host_flags():
         cmds = {}
-        cmds["ps_hosts"] = ",".join([h + ":50000" for h in hosts])
+        cmds["ps_hosts"] = ",".join([h + ":50000" for h in hosts][:num_ps])
         cmds["worker_hosts"] = ",".join([h + ":50001" for h in hosts])
         return cmds
     host_flags = generate_host_flags()
@@ -46,11 +51,13 @@ def dist_replicated_cmd_builder(hosts, kwargs):
         print("#" * 10)
         print("Run the following commands on", h)
         print("#" * 10)
-        print(build_ps_cmd(hkwargs) + " &")
+        ps_cmd = build_ps_cmd(hkwargs) if h in ps_hosts else None
+        print(ps_cmd)
         print("")
-        print(build_worker_cmd(hkwargs))
+        worker_cmd = build_worker_cmd(hkwargs)
+        print(worker_cmd)
         print("")
-        cmds[h] = [build_ps_cmd(hkwargs), build_worker_cmd(hkwargs)]
+        cmds[h] = [ps_cmd, worker_cmd]
     return cmds
 
 
@@ -100,7 +107,8 @@ if __name__ == '__main__':
         'num_gpus': '8',
         'variable_update': 'distributed_replicated',
     }
-    dist_replicated_cmd_builder(hosts, args)
+    dist_replicated_cmd_builder(hosts, args, )
+
 
     args = {
         'batch_size': '64',

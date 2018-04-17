@@ -1491,7 +1491,6 @@ class BenchmarkCNN(object):
             saver=saver,
             local_init_op=local_var_init_op_group,
             ready_for_local_init_op=ready_for_local_init_op,
-            global_step=global_step,
             summary_op=None,)
     sv = tf.train.MonitoredTrainingSession(
         # For the purpose of Supervisor, all Horovod workers are 'chiefs',
