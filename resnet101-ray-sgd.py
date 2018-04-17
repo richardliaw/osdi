@@ -82,6 +82,7 @@ class SGDWorker(object):
         tf_session_args = {
             "device_count": {"CPU": num_devices},
             "log_device_placement": False,
+            'gpu_options': tf.GPUOptions(force_gpu_compatible=True),
         }
         config_proto = tf.ConfigProto(**tf_session_args)
         self.sess = tf.Session(config=config_proto)
@@ -135,7 +136,7 @@ class SGDWorker(object):
             for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
                 with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                     plasma_grad = memcpy_plasma_module.tensor_to_plasma(
-                        grad,
+                        [grad],
                         self.plasma_in_grads_oids[j],
                         plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                         plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
