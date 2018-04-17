@@ -122,9 +122,7 @@ class SGDWorker(object):
                         self.plasma_out_grads_oids[j],
                         plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                         plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                    print(g)
-                    print(v)
-                    grad_ph = tf.reshape(grad_ph, v.shape)
+                    grad_ph = tf.reshape(grad_ph, g.shape)
                     per_device.append((grad_ph, v))
                 unpacked_gv.append(per_device)
 
