@@ -12,7 +12,7 @@ def get_private_ip(host):
 
 def build_worker_cmd(kwargs):
     kwargs = copy.deepcopy(kwargs)
-    kwargs.update({"job_name": "worker"})
+    kwargs.update({"job_name": "worker", "local_parameter_device": "gpu"})
     root = ["python", "tf_cnn_benchmarks.py"] + to_argv(kwargs)
     return " ".join(root)
 
@@ -21,7 +21,7 @@ def build_worker_cmd(kwargs):
 
 def build_ps_cmd(kwargs):
     kwargs = copy.deepcopy(kwargs)
-    kwargs.update({"job_name": "ps"})
+    kwargs.update({"job_name": "ps", "local_parameter_device": "cpu"})
     root = ["CUDA_VISIBLE_DEVICES=", "python", "tf_cnn_benchmarks.py"
             ] + to_argv(kwargs)
     return " ".join(root)
