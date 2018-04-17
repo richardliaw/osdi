@@ -132,11 +132,8 @@ class SGDWorker(object):
             self.plasma_in_grads = []
             self.plasma_in_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
-            all_grads = []
-            for per_device in self.per_device_grads:
-                all_grads.extend(per_device)
-            with tf.control_dependencies(all_grads):
-                for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
+            for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
+                with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                     plasma_grad = memcpy_plasma_module.tensor_to_plasma(
                         grad,
                         self.plasma_in_grads_oids[j],
@@ -156,6 +153,7 @@ class SGDWorker(object):
                         plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                         plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                     grad_ph = tf.reshape(grad_ph, g.shape)
+                    print("Packed tensor", grad_ph)
                     per_device.append((grad_ph, v))
                 unpacked_gv.append(per_device)
 
