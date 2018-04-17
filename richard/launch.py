@@ -54,7 +54,6 @@ if __name__ == '__main__':
     host_to_runner = dict(zip(hosts, runners))
     tf_args = {
         'batch_size': str(parsed_args.batch),
-        'local_parameter_device': 'gpu',
         'model': 'resnet101',
         'num_gpus': '8',
         'variable_update': parsed_args.var_update,
