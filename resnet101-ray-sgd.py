@@ -111,21 +111,6 @@ class SGDWorker(object):
         if plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
 
-            # For applying grads <- plasma
-            unpacked_gv = []
-            self.plasma_out_grads_oids = [
-                tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
-            for i in range(num_devices):
-                per_device = []
-                for j, (g, v) in enumerate(self.per_device_grads_and_vars[i]):
-                    grad_ph = memcpy_plasma_module.plasma_to_tensor(
-                        self.plasma_out_grads_oids[j],
-                        plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
-                        plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                    grad_ph = tf.reshape(grad_ph, g.shape)
-                    per_device.append((grad_ph, v))
-                unpacked_gv.append(per_device)
-
             # For fetching grads -> plasma
             self.plasma_in_grads = []
             self.plasma_in_grads_oids = [
@@ -141,6 +126,21 @@ class SGDWorker(object):
                         plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                         plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                     self.plasma_in_grads.append(plasma_grad)
+
+            # For applying grads <- plasma
+            unpacked_gv = []
+            self.plasma_out_grads_oids = [
+                tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
+            for i in range(num_devices):
+                per_device = []
+                for j, (g, v) in enumerate(self.per_device_grads_and_vars[i]):
+                    grad_ph = memcpy_plasma_module.plasma_to_tensor(
+                        self.plasma_out_grads_oids[j],
+                        plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
+                        plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
+                    grad_ph = tf.reshape(grad_ph, g.shape)
+                    per_device.append((grad_ph, v))
+                unpacked_gv.append(per_device)
 
             if max_bytes:
                 unpacked_gv = allreduce.unpack_small_tensors(unpacked_gv, packing_vals)
