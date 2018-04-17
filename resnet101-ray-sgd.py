@@ -142,6 +142,9 @@ class SGDWorker(object):
                         plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                     self.plasma_in_grads.append(plasma_grad)
 
+            if max_bytes:
+                unpacked_gv = allreduce.unpack_small_tensors(unpacked_gv, packing_vals)
+
         elif max_bytes:
             unpacked_gv = allreduce.unpack_small_tensors(self.per_device_grads_and_vars, packing_vals)
         else:
@@ -149,7 +152,7 @@ class SGDWorker(object):
 
         # Same shape as per_device_grads_and_vars
         assert len(unpacked_gv) == num_devices
-        assert len(unpacked_gv[0]) == num_grads
+        assert len(unpacked_gv[0]) == 314
         assert len(unpacked_gv[0][0]) == 2
 
         self.apply_op = tf.group(
