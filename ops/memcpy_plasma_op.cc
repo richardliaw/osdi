@@ -66,7 +66,7 @@ public:
 
     float *data = reinterpret_cast<float *>(data_buffer->mutable_data());
 
-    auto wrapped_callback = [this, done, &object_id, data_buffer]() {
+    auto wrapped_callback = [this, done, object_id, data_buffer]() {
       {
         mutex_lock lock(mu_);
         ARROW_CHECK_OK(client_.Seal(object_id));
@@ -93,7 +93,7 @@ public:
                         errors::Internal("D2H memcpy failed to be enqueued."),
                         done);
       context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
-          stream, std::move(wrapped_callback));
+          stream, wrapped_callback);
     }
   }
 
