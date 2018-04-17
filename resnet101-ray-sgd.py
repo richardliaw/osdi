@@ -87,6 +87,7 @@ class SGDWorker(object):
 
         self.models = models
         if num_devices == 1:
+           assert not max_bytes, "Not supported with 1 GPU"
            self.per_device_grads_and_vars = grad_ops
         elif all_reduce_alg:
             if max_bytes:
@@ -98,12 +99,13 @@ class SGDWorker(object):
             else:
                 self.per_device_grads_and_vars = allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
-                assert(len(self.per_device_grads_and_vars) == num_devices)
-                assert(len(self.per_device_grads_and_vars[0]) == 314)
-                assert(len(self.per_device_grads_and_vars[0][0]) == 2)
         self.per_device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.per_device_grads_and_vars]
         assert(len(self.per_device_grads) == num_devices)
-        assert(len(self.per_device_grads_and_vars[0]) == 314)
+        num_grads = len(self.per_device_grads_and_vars[0])
+        if max_bytes:
+            assert(num_grads < 314)
+        else:
+            assert(num_grads == 314)
 
         if plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
@@ -111,7 +113,7 @@ class SGDWorker(object):
             # For applying grads <- plasma
             unpacked_gv = []
             self.plasma_out_grads_oids = [
-                tf.placeholder(shape=[], dtype=tf.string) for _ in range(314)]
+                tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
             for i in range(num_devices):
                 per_device = []
                 for j, (_, v) in enumerate(self.per_device_grads_and_vars[i]):
@@ -126,7 +128,7 @@ class SGDWorker(object):
             # For fetching grads -> plasma
             self.plasma_in_grads = []
             self.plasma_in_grads_oids = [
-                tf.placeholder(shape=[], dtype=tf.string) for _ in range(314)]
+                tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
             all_grads = []
             for per_device in self.per_device_grads:
                 all_grads.extend(per_device)
@@ -146,7 +148,7 @@ class SGDWorker(object):
 
         # Same shape as per_device_grads_and_vars
         assert len(unpacked_gv) == num_devices
-        assert len(unpacked_gv[0]) == 314
+        assert len(unpacked_gv[0]) == num_grads
         assert len(unpacked_gv[0][0]) == 2
 
         self.apply_op = tf.group(
