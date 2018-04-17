@@ -62,7 +62,8 @@ class SGDWorker(object):
         self.i = i
         assert num_devices > 0
         tf_session_args = {
-            "device_count": {"CPU": num_devices}
+            "device_count": {"CPU": num_devices},
+            "log_device_placement": True,
         }
         config_proto = tf.ConfigProto(**tf_session_args)
         self.sess = tf.Session(config=config_proto)
