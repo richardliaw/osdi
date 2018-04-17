@@ -66,7 +66,7 @@ public:
 
     float *data = reinterpret_cast<float *>(data_buffer->mutable_data());
 
-    auto wrapped_callback = [this, done, &object_id]() {
+    auto wrapped_callback = [this, done, &object_id, data_buffer]() {
       {
         mutex_lock lock(mu_);
         ARROW_CHECK_OK(client_.Seal(object_id));
