@@ -101,7 +101,7 @@ class TensorToPlasmaOp : public AsyncOpKernel {
                         errors::Internal("D2H memcpy failed to be enqueued."),
                         done);
       context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
-          stream, std::move(wrapped_callback));
+          stream, wrapped_callback);
     }
   }
 
