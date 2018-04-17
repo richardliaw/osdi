@@ -232,7 +232,7 @@ def do_sgd_step(actors, local_only, write_timeline, verbose, plasma_op):
     else:
         start = time.time()
         if plasma_op:
-            grads = ray.get([a.compute_gradients_to_plasma_direct.remote(verbose) for a in actors])
+            grads = ray.get([a.compute_gradients_to_plasma_direct.remote(verbose, write_timeline) for a in actors])
         else:
             grads = ray.get([a.compute_gradients.remote(verbose) for a in actors])
         if verbose:
