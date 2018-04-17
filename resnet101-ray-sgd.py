@@ -179,7 +179,7 @@ class SGDWorker(object):
         self.sess.run(init_op)
 
     def compute_apply(self, write_timeline):
-        run_timeline(sess, self.apply_op, write_timeline=write_timeline, timeline="compute_apply")
+        run_timeline(self.sess, self.apply_op, write_timeline=write_timeline, timeline="compute_apply")
 
     def compute_gradients(self, verbose):
         start = time.time()
@@ -202,7 +202,7 @@ class SGDWorker(object):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
         start = time.time()
-        fetches = run_timeline(sess, self.plasma_in_grads, feed_dict={
+        fetches = run_timeline(self.sess, self.plasma_in_grads, feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
         }, write_timeline=write_timeline, timeline="grads_plasma_direct")
         if verbose:
