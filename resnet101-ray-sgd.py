@@ -14,7 +14,7 @@ import ray
 import time
 
 
-def run_timeline(sess, ops, feed_dict={}, write_timeline=False, timeline=""):
+def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
     if write_timeline:
         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
         run_metadata = tf.RunMetadata()
@@ -22,7 +22,7 @@ def run_timeline(sess, ops, feed_dict={}, write_timeline=False, timeline=""):
             ops, options=run_options, run_metadata=run_metadata,
             feed_dict=feed_dict)
         trace = timeline.Timeline(step_stats=run_metadata.step_stats)
-        outf = "timeline-{}.json".format(timeline)
+        outf = "timeline-{}.json".format(name)
         trace_file = open(outf, "w")
         print("wrote tf timeline to", os.path.abspath(outf))
         trace_file.write(trace.generate_chrome_trace_format())
@@ -179,7 +179,7 @@ class SGDWorker(object):
         self.sess.run(init_op)
 
     def compute_apply(self, write_timeline):
-        run_timeline(self.sess, self.apply_op, write_timeline=write_timeline, timeline="compute_apply")
+        run_timeline(self.sess, self.apply_op, write_timeline=write_timeline, name="compute_apply")
 
     def compute_gradients(self, verbose):
         start = time.time()
@@ -204,7 +204,7 @@ class SGDWorker(object):
         start = time.time()
         fetches = run_timeline(self.sess, self.plasma_in_grads, feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
-        }, write_timeline=write_timeline, timeline="grads_plasma_direct")
+        }, write_timeline=write_timeline, name="grads_plasma_direct")
         if verbose:
             print("compute grad plasma interior time", time.time() - start)
         return plasma_in_grads_oids
