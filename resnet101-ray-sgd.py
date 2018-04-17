@@ -194,7 +194,7 @@ class SGDWorker(object):
         })
         if verbose:
             print("compute grad plasma interior time", time.time() - start)
-        return fetches
+        return plasma_in_grads_oids
 
     def apply_gradients_from_plasma_direct(self, avg_grads_oids, verbose):
         start = time.time()
@@ -213,12 +213,15 @@ def average_gradients(grads):
     return out
 
 
-def do_sgd_step(actors, local_only, write_timeline, verbose):
+def do_sgd_step(actors, local_only, write_timeline, verbose, plasma_op):
     if local_only:
         ray.get([a.compute_apply.remote(write_timeline) for a in actors])
     else:
         start = time.time()
-        grads = ray.get([a.compute_gradients.remote(verbose) for a in actors])
+        if plasma_op:
+            grads = ray.get([a.compute_gradients_plasma_direct.remote(verbose) for a in actors])
+        else:
+            grads = ray.get([a.compute_gradients.remote(verbose) for a in actors])
         if verbose:
             print("compute all grads time", time.time() - start)
         start = time.time()
@@ -231,7 +234,10 @@ def do_sgd_step(actors, local_only, write_timeline, verbose):
         if verbose:
             print("distributed allreduce time", time.time() - start)
         start = time.time()
-        ray.get([a.apply_gradients.remote(avg_grad, verbose) for a in actors])
+        if plasma_op:
+            ray.get([a.apply_gradients_plasma_direct.remote(avg_grad, verbose) for a in actors])
+        else:
+            ray.get([a.apply_gradients.remote(avg_grad, verbose) for a in actors])
         if verbose:
             print("apply all grads time", time.time() - start)
 
@@ -317,5 +323,5 @@ if __name__ == "__main__":
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.local_only, args.timeline, args.verbose)
+        do_sgd_step(actors, args.local_only, args.timeline, args.verbose, args.plasma_op)
         print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
