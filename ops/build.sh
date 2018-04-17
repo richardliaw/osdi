@@ -17,8 +17,8 @@ if [ "$(uname)" == "Darwin" ]; then
     TF_CFLAGS="-undefined dynamic_lookup ${TF_CFLAGS}"
 fi
 
-NDEBUG="-DNDEBUG"
 NDEBUG=""
+NDEBUG="-DNDEBUG"
 
 # nvcc -std=c++11 -c -o ${module}.cu.o ${module}_gpu.cu.cc \
 #      ${TF_CFLAGS[@]} -D GOOGLE_CUDA=1 -x cu -Xcompiler -fPIC
