@@ -14,6 +14,23 @@ import ray
 import time
 
 
+def run_timeline(sess, ops, feed_dict={}, write_timeline=False, timeline=""):
+    if write_timeline:
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
+        fetches = sess.run(
+            ops, options=run_options, run_metadata=run_metadata,
+            feed_dict=feed_dict)
+        trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+        outf = "timeline-{}.json".format(timeline)
+        trace_file = open(outf, "w")
+        print("wrote tf timeline to", os.path.abspath(outf))
+        trace_file.write(trace.generate_chrome_trace_format())
+    else:
+        fetches = sess.run(ops, feed_dict=feed_dict)
+    return fetches
+
+
 class MockDataset():
     name = "synthetic"
 
@@ -162,19 +179,7 @@ class SGDWorker(object):
         self.sess.run(init_op)
 
     def compute_apply(self, write_timeline):
-       if write_timeline:
-           run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
-           run_metadata = tf.RunMetadata()
-           self.sess.run(self.apply_op,
-               options=run_options,
-               run_metadata=run_metadata)
-           trace = timeline.Timeline(step_stats=run_metadata.step_stats)
-           outf = "timeline-sgd.json"
-           trace_file = open(outf, "w")
-           print("wrote tf timeline to", os.path.abspath(outf))
-           trace_file.write(trace.generate_chrome_trace_format())
-       else:
-          self.sess.run(self.apply_op)
+        run_timeline(sess, self.apply_op, write_timeline, timeline="compute_apply")
 
     def compute_gradients(self, verbose):
         start = time.time()
@@ -193,13 +198,13 @@ class SGDWorker(object):
         if verbose:
             print("apply grad interior time", time.time() - start)
 
-    def compute_gradients_to_plasma_direct(self, verbose):
+    def compute_gradients_to_plasma_direct(self, verbose, write_timeline):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
         start = time.time()
-        fetches = self.sess.run(self.plasma_in_grads, feed_dict={
+        fetches = run_timeline(sess, self.plasma_in_grads, feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
-        })
+        }, write_timeline=write_timeline, timeline="grads_plasma_direct")
         if verbose:
             print("compute grad plasma interior time", time.time() - start)
         return plasma_in_grads_oids
