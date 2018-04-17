@@ -237,7 +237,8 @@ def do_sgd_step(actors, local_only, write_timeline, verbose, plasma_op):
             print("distributed allreduce time", time.time() - start)
         start = time.time()
         if plasma_op:
-            ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, verbose) for a in actors])
+            print("TODO apply grads crashes with plasma op, skipping for now")
+#            ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, verbose) for a in actors])
         else:
             ray.get([a.apply_gradients.remote(avg_grad, verbose) for a in actors])
         if verbose:
