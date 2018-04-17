@@ -104,7 +104,7 @@ class SGDWorker(object):
         assert(len(self.per_device_grads_and_vars[0]) == 314)
 
         if plasma_op:
-            memcpy_plasma_module = tf.load_op_library("../ops/memcpy_plasma_op.so")
+            memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
 
             # For applying grads <- plasma
             unpacked_gv = []
