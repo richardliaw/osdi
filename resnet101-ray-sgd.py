@@ -132,7 +132,7 @@ class SGDWorker(object):
                 for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
                     plasma_grad = memcpy_plasma_module.tensor_to_plasma(
                         grad,
-                        self.plasma_in_device_grads_oids[j],
+                        self.plasma_in_grads_oids[j],
                         plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                         plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                     self.plasma_in_grads.append(plasma_grad)
