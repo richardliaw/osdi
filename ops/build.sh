@@ -33,7 +33,7 @@ g++ -std=c++11 -g -shared ${module}.cc -o ${module}.so \
     -L$RAY_ROOT/thirdparty/pkg/arrow/cpp/build/cpp-install/lib \
     -fPIC \
     ${TF_CFLAGS[@]} \
-    -L/usr/local/cuda/lib64 -lcudart \
+    -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -lcudart \
     ${TF_LFLAGS[@]} -lplasma -larrow \
     -O2
 

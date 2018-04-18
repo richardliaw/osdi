@@ -7,6 +7,7 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+import tensorflow.contrib.nccl as nccl
 from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
 import os
@@ -36,9 +37,10 @@ class MockDataset():
 
 
 class TFBenchModel(object):
-    def __init__(self, batch=64, use_cpus=False):
+    def __init__(self, batch=64, use_cpus=False, device=""):
         image_shape = [batch, 224, 224, 3]
         labels_shape = [batch]
+        self.device = device
 
         # Synthetic image should be within [0, 255].
         images = tf.truncated_normal(
@@ -82,6 +84,7 @@ class SGDWorker(object):
         tf_session_args = {
             "device_count": {"CPU": num_devices},
             "log_device_placement": False,
+            'gpu_options': tf.GPUOptions(force_gpu_compatible=True),
         }
         config_proto = tf.ConfigProto(**tf_session_args)
         self.sess = tf.Session(config=config_proto)
@@ -93,9 +96,10 @@ class SGDWorker(object):
         else:
             device_tmpl = "/gpu:%d"
         for device_idx in range(num_devices):
-            with tf.device(device_tmpl % device_idx):
+            device = device_tmpl % device_idx
+            with tf.device(device):
                 with tf.variable_scope("device_%d" % device_idx):
-                    model = model_cls(batch=batch_size, use_cpus=use_cpus)
+                    model = model_cls(batch=batch_size, use_cpus=use_cpus, device=device)
                     models += [model]
                     model.grads = [
                         t for t in model.optimizer.compute_gradients(model.loss)
@@ -125,7 +129,13 @@ class SGDWorker(object):
         else:
             assert(num_grads == 314)
 
-        if plasma_op:
+        self.first_device_grads = []
+        for j in range(num_grads):
+            grad = self.per_device_grads[0][j]
+            with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
+                self.first_device_grads.append(tf.identity(grad))
+
+        if args.plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
 
             # For fetching grads -> plasma
@@ -170,8 +180,12 @@ class SGDWorker(object):
         assert len(unpacked_gv[0]) == 314
         assert len(unpacked_gv[0][0]) == 2
 
-        self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(g) for g, m in zip(unpacked_gv, models)])
+        apply_ops = []
+        to_apply = self.first_device_grads
+        for ix, m in enumerate(models):
+            apply_ops.append(m.optimizer.apply_gradients(
+                [(g, v) for (g, (_, v)) in zip(to_apply, unpacked_gv[ix])]))
+        self.apply_op = tf.group(*apply_ops)
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
         self.sess.run(init_op)
@@ -185,17 +199,16 @@ class SGDWorker(object):
 
     def compute_gradients(self, args):
         start = time.time()
-        fetches = self.sess.run(self.per_device_grads)
+        fetches = self.sess.run(self.first_device_grads)
         if args.verbose:
             print("compute grad interior time", time.time() - start)
-        return fetches[0]
+        return fetches
 
     def apply_gradients(self, avg_grads, args):
         start = time.time()
-        result = {}
-        for per_device_grads_and_vars in self.per_device_grads_and_vars:
-            m = {per_device_grads_and_vars[j][0]: grad for j, grad in enumerate(avg_grads)}
-            result.update(m)
+        result = {
+            g: avg_grads[i] for (i, g) in enumerate(self.first_device_grads)
+        }
         self.sess.run(self.apply_op, feed_dict=result)
         if args.verbose:
             print("apply grad interior time", time.time() - start)
@@ -253,7 +266,7 @@ def do_sgd_step(actors, args):
         if args.verbose:
             print("distributed allreduce time", time.time() - start)
         start = time.time()
-        if plasma_op:
+        if args.plasma_op:
             print("TODO apply grads crashes with plasma op, skipping for now")
 #            ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, args) for a in actors])
         else:
