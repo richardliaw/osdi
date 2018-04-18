@@ -34,8 +34,7 @@ def sum_gradients_all_reduce(dev_prefixes,
                              alg,
                              num_shards,
                              gpu_indices,
-                             agg_small_grads_max_bytes=0,
-                             agg_small_grads_max_group=10):
+                             agg_small_grads_max_bytes=0):
   """Apply all-reduce algorithm over specified gradient tensors.
 
   Args:
@@ -47,8 +46,6 @@ def sum_gradients_all_reduce(dev_prefixes,
     gpu_indices: indices of local GPUs in order usable for ring-reduce.
     agg_small_grads_max_bytes: largest tensor eligible for aggregation,
       in number of bytes.
-    agg_small_grads_max_group: largest permitted aggregation of small
-      tensors.
 
   Returns:
     list of reduced tensors, packing values
@@ -68,11 +65,11 @@ def sum_gradients_all_reduce(dev_prefixes,
   aux_device_groups = group_device_names(aux_devices, num_shards
                                          if alg_contains_shuffle else 1)
   group_index = 0
-  if agg_small_grads_max_bytes > 0 and agg_small_grads_max_group > 0:
+  if agg_small_grads_max_bytes > 0:
     tower_grads, packing = pack_small_tensors(
         tower_grads,
-        max_bytes=agg_small_grads_max_bytes,
-        max_group=agg_small_grads_max_group)
+        max_bytes=agg_small_grads_max_bytes)
+        
   else:
     packing = None
   reduced_gv_list = []
@@ -94,8 +91,6 @@ def pack_small_tensors(tower_grads, max_bytes=0):
     tower_grads: List of lists of (gradient, variable) tuples.
     max_bytes: Int giving max number of bytes in a tensor that
       may be considered small.
-    max_group: Int giving max number of small tensors that may be
-      concatenated into one new tensor.
   """
   assert max_bytes >= 0
   orig_grads = [g for g, _ in tower_grads[0]]
@@ -104,10 +99,11 @@ def pack_small_tensors(tower_grads, max_bytes=0):
   sizes = [4 * g.shape.num_elements() for g in orig_grads]
   print("Before packing - avg size %f, median size %f" % (
     np.mean(sizes), np.median(sizes)))
+  import ipdb; ipdb.set_trace()
   small_ranges = []
   large_indices = []
 
-  def end_interval(indices):
+  def end_interval(indices, small_ranges, large_indices):
     if len(indices) > 1:
       small_ranges += [[indices[0], indices[-1]]]
     else:
@@ -117,12 +113,12 @@ def pack_small_tensors(tower_grads, max_bytes=0):
   cur_size = 0
   for i, s in enumerate(sizes):
     if cur_size > max_bytes:
-      end_interval(cur_range)
+      end_interval(cur_range, small_ranges, large_indices)
       cur_range = []
       cur_size = 0
     cur_range += [i]
     cur_size += s
-  end_interval(cur_range)
+  end_interval(cur_range, small_ranges, large_indices)
 
   if len(small_ranges):
     new_tower_grads = []
