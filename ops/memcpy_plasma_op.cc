@@ -17,9 +17,9 @@ using ArrowStatus = arrow::Status;
 using CPUDevice = Eigen::ThreadPoolDevice;
 using GPUDevice = Eigen::GpuDevice;
 
-// static plasma::PlasmaClient client_;
-// static bool connected_ = false;
-// static mutex mu_;
+static plasma::PlasmaClient client_;
+static bool connected_ = false;
+static mutex mu_;
 
 using Event = perftools::gputools::Event;
 using Stream = perftools::gputools::Stream;
@@ -262,10 +262,6 @@ public:
 private:
   std::string plasma_store_socket_name_;
   std::string plasma_manager_socket_name_;
-
-  bool connected_ = false;
-  mutex mu_; // To guard "client_".
-  plasma::PlasmaClient client_ GUARDED_BY(mu_);
 };
 
 REGISTER_OP("TensorToPlasma")
