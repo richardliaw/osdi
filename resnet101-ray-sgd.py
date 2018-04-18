@@ -125,6 +125,11 @@ class SGDWorker(object):
         else:
             assert(num_grads == 314)
 
+        self.first_device_grads = []
+        for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
+            with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
+                self.first_device_grads.append(tf.identity(grad))
+
         if plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
 
@@ -185,10 +190,10 @@ class SGDWorker(object):
 
     def compute_gradients(self, args):
         start = time.time()
-        fetches = self.sess.run(self.per_device_grads)
+        fetches = self.sess.run(self.first_device_grads)
         if args.verbose:
             print("compute grad interior time", time.time() - start)
-        return fetches[0]
+        return fetches
 
     def apply_gradients(self, avg_grads, args):
         start = time.time()
