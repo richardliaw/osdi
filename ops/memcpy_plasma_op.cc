@@ -69,8 +69,8 @@ public:
   }
 
   void ComputeAsync(OpKernelContext *context, DoneCallback done) override {
-    GPUDeviceContext *gpu_ctx = context->op_device_context<GPUDeviceContext>();
-    CHECK(gpu_ctx != nullptr);
+    // GPUDeviceContext *gpu_ctx = context->op_device_context<GPUDeviceContext>();
+    // CHECK(gpu_ctx != nullptr);
 
     const int num_inputs = context->num_inputs();
     OP_REQUIRES_ASYNC(
