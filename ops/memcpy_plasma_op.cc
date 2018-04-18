@@ -154,6 +154,12 @@ public:
                         errors::Internal("No GPU stream available."), done);
       auto stream_executor = orig_stream->parent();
 
+      // NOTE(zongheng): this is critical of getting good performance out of D2H
+      // async memcpy.  Under the hood it performs cuMemHostRegister(), see:
+      // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gf0a9fe11544326dabd743b7aa6b54223
+      CHECK(stream_executor->HostMemoryRegister(
+          static_cast<void *>(data), static_cast<uint64>(total_bytes)));
+
       {
         mutex_lock l(stream_mu);
         if (stream == nullptr) {
@@ -169,12 +175,13 @@ public:
 
       // stream_executor->AllocateEvent(&event);
       // Event* event = new Event(stream_executor);
-      // std::shared_ptr<Event> event =
-      // std::make_shared<Event>(stream_executor); CHECK(event->Init());
-      // CHECK(orig_stream->ThenRecordEvent(event.get()).ok());
-      // CHECK(stream->ThenWaitFor(event.get()).ok());
 
-      CHECK(stream->ThenWaitFor(orig_stream).ok());
+      std::shared_ptr<Event> event =
+      std::make_shared<Event>(stream_executor); CHECK(event->Init());
+      CHECK(orig_stream->ThenRecordEvent(event.get()).ok());
+      CHECK(stream->ThenWaitFor(event.get()).ok());
+
+      // CHECK(stream->ThenWaitFor(orig_stream).ok());
 
       // const cudaStream_t *stream_ptr =
       //     CHECK_NOTNULL(reinterpret_cast<const cudaStream_t *>(
