@@ -7,6 +7,7 @@ from __future__ import print_function
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+import tensorflow.contrib.nccl as nccl
 from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
 import os
@@ -179,8 +180,15 @@ class SGDWorker(object):
         assert len(unpacked_gv[0]) == 314
         assert len(unpacked_gv[0][0]) == 2
 
-        self.apply_op = tf.group(
-            *[m.optimizer.apply_gradients(g) for g, m in zip(unpacked_gv, models)])
+        apply_ops = []
+        if use_cpus:
+            to_apply = self.first_device_grads
+        else:
+            to_apply = [nccl.broadcast(g) for g in self.first_device_grads]
+        for ix, m in enumerate(models):
+            apply_ops.append(m.optimizer.apply_gradients(
+                [(g, v) for (g, (_, v)) in zip(to_apply, unpacked_gv[ix])]))
+        self.apply_op = tf.group(*apply_ops)
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
         self.sess.run(init_op)
@@ -201,10 +209,9 @@ class SGDWorker(object):
 
     def apply_gradients(self, avg_grads, args):
         start = time.time()
-        result = {}
-        for per_device_grads_and_vars in self.per_device_grads_and_vars:
-            m = {per_device_grads_and_vars[j][0]: grad for j, grad in enumerate(avg_grads)}
-            result.update(m)
+        result = {
+            g: avg_grads[i] for (i, g) in enumerate(self.first_device_grads)
+        }
         self.sess.run(self.apply_op, feed_dict=result)
         if args.verbose:
             print("apply grad interior time", time.time() - start)
