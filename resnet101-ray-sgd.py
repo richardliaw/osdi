@@ -344,5 +344,5 @@ if __name__ == "__main__":
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.local_only, args.timeline, args.verbose, args.plasma_op, args.split)
+        do_sgd_step(actors, args)
         print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
