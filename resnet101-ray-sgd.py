@@ -234,7 +234,9 @@ class SGDWorker(object):
         feed = {
             ph: oid for (ph, oid) in zip(self.plasma_out_grads_oids, avg_grads_oids)
         }
-        self.sess.run(self.apply_op, feed_dict=feed)
+        run_timeline(
+            self.sess, self.apply_op, feed_dict=feed,
+            write_timeline=args.timeline, name="apply_plasma_direct")
         if args.verbose:
             print("apply grad plasma interior time", time.time() - start)
 
