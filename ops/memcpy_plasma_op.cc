@@ -1,7 +1,7 @@
 
 #include "plasma/client.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_event_mgr.h"
-#include "tensorflow/core/common_runtime/gpu_device_context.h"
+// #include "tensorflow/core/common_runtime/gpu_device_context.h"
 #include "tensorflow/core/framework/device_base.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"

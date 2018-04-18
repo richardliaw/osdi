@@ -135,7 +135,7 @@ class SGDWorker(object):
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                 self.first_device_grads.append(tf.identity(grad))
 
-        if plasma_op:
+        if args.plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
 
             # For fetching grads -> plasma
@@ -250,7 +250,7 @@ def do_sgd_step(actors, args):
     else:
         assert not args.split
         start = time.time()
-        if plasma_op:
+        if args.plasma_op:
             grads = ray.get([a.compute_gradients_to_plasma_direct.remote(args) for a in actors])
         else:
             grads = ray.get([a.compute_gradients.remote(args) for a in actors])
@@ -266,7 +266,7 @@ def do_sgd_step(actors, args):
         if args.verbose:
             print("distributed allreduce time", time.time() - start)
         start = time.time()
-        if plasma_op:
+        if args.plasma_op:
             print("TODO apply grads crashes with plasma op, skipping for now")
 #            ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, args) for a in actors])
         else:
