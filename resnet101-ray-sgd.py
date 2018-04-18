@@ -177,7 +177,7 @@ class SGDWorker(object):
         self.sess.run(init_op)
 
     def compute_apply(self, args):
-        run_timeline(self.sess, self.apply_op, write_timeline=args.write_timeline, name="compute_apply")
+        run_timeline(self.sess, self.apply_op, write_timeline=args.timeline, name="compute_apply")
 
     def compute_apply_split(self, args):
         grad = self.compute_gradients(args)
@@ -206,7 +206,7 @@ class SGDWorker(object):
         start = time.time()
         fetches = run_timeline(self.sess, self.plasma_in_grads, feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
-        }, write_timeline=args.write_timeline, name="grads_plasma_direct")
+        }, write_timeline=args.timeline, name="grads_plasma_direct")
         if args.verbose:
             print("compute grad plasma interior time", time.time() - start)
         return plasma_in_grads_oids
@@ -233,7 +233,7 @@ def do_sgd_step(actors, args):
         if args.split:
             ray.get([a.compute_apply_split.remote(args.verbose) for a in actors])
         else:
-            ray.get([a.compute_apply.remote(args.write_timeline) for a in actors])
+            ray.get([a.compute_apply.remote(args.timeline) for a in actors])
     else:
         assert not args.split
         start = time.time()
