@@ -1,7 +1,7 @@
 
 #include "plasma/client.h"
 #include "tensorflow/core/common_runtime/gpu/gpu_event_mgr.h"
-// #include "tensorflow/core/common_runtime/gpu_device_context.h"
+#include "tensorflow/core/common_runtime/gpu_device_context.h"
 #include "tensorflow/core/framework/device_base.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -56,6 +56,9 @@ public:
   }
 
   void ComputeAsync(OpKernelContext *context, DoneCallback done) override {
+    GPUDeviceContext *gpu_ctx = context->op_device_context<GPUDeviceContext>();
+    CHECK(gpu_ctx != nullptr);
+
     const int num_inputs = context->num_inputs();
     OP_REQUIRES_ASYNC(
         context, num_inputs >= 2,
@@ -71,6 +74,7 @@ public:
     for (int i = 0; i < num_tensors; ++i) {
       const size_t s = context->input(i).TotalBytes();
       CHECK(s == context->input(i).NumElements() * sizeof(float));
+      CHECK(s > 0);
       total_bytes += s;
       offsets.push_back(total_bytes);
     }
@@ -102,7 +106,7 @@ public:
     auto wrapped_callback = [this, done, data_buffer, object_id]() {
       {
         mutex_lock lock(mu_);
-        LOG(INFO) << "Calling Seal";
+        // LOG(INFO) << "Calling Seal";
         ARROW_CHECK_OK(client_.Seal(object_id));
       }
 
@@ -123,12 +127,14 @@ public:
       wrapped_callback();
     } else {
 
-      cudaStream_t copy_stream;
-      CHECK(cudaStreamCreate(&copy_stream) == cudaSuccess);
-      LOG(INFO) << "copy_stream created";
+      // cudaStream_t copy_stream;
+      // CHECK(cudaStreamCreate(&copy_stream) == cudaSuccess);
+      // LOG(INFO) << "copy_stream created";
 
       // Launch 1 memcpy per Tensor.
       auto stream = context->op_device_context()->stream();
+      // auto stream = gpu_ctx->device_to_host_stream();
+
       // auto orig_stream = context->op_device_context()->stream();
       // OP_REQUIRES_ASYNC(context, orig_stream != nullptr,
       //                   errors::Internal("No GPU stream available."), done);
@@ -138,9 +144,13 @@ public:
       // //     static_cast<const GPUDeviceContext
       // *>(context->op_device_context())
       // //         ->host_to_device_stream();
-      // OP_REQUIRES_ASYNC(context, stream != nullptr,
-      //                   errors::Internal("No H2D GPU stream available."),
-      //                   done);
+      OP_REQUIRES_ASYNC(context, stream != nullptr,
+                        errors::Internal("No H2D GPU stream available."), done);
+
+      const cudaStream_t *stream_ptr =
+          CHECK_NOTNULL(reinterpret_cast<const cudaStream_t *>(
+              stream->implementation()->CudaStreamMemberHack()));
+
       // // Wait for the recv-stream to make sure the buffer is truly available.
       // stream->ThenWaitFor(orig_stream);
 
@@ -152,6 +162,13 @@ public:
       // }
 
       for (int i = 0; i < num_tensors; ++i) {
+
+        // GPUDeviceContext *input_gpu_ctx =
+        //     context->input_device_context<GPUDeviceContext>(i);
+        // if (input_gpu_ctx != nullptr) {
+        //   stream->ThenWaitFor(input_gpu_ctx->stream());
+        // }
+
         const auto &input_tensor = context->input(i);
         // TensorReference input_tensor_ref(input_tensor);
         // LOG(INFO) << "Memcpy ( tensor " << i
@@ -164,27 +181,37 @@ public:
         // for (int j = 0; j < input_tensor.NumElements(); ++j)
         //   LOG(INFO) << input_buffer[j];
 
-        // perftools::gputools::DeviceMemoryBase wrapped_src(
-        //     static_cast<void *>(input_buffer));
+        perftools::gputools::DeviceMemoryBase wrapped_src(
+            static_cast<void *>(input_buffer));
         // TODO(zongheng): do we need to somehow call HostMemoryRegister()?
-        // const bool success =
-        //     stream
-        //         ->ThenMemcpy(
-        //             static_cast<void *>(data + offsets[i] / sizeof(float)),
-        //             wrapped_src,
-        //             static_cast<uint64>(offsets[i + 1] - offsets[i]))
-        //         .ok();
-        // OP_REQUIRES_ASYNC(context, success,
-        //                   errors::Internal("D2H memcpy failed to be
-        //                   enqueued."), done);
+        const bool success =
+            stream
+                ->ThenMemcpy(
+                    static_cast<void *>(data + offsets[i] / sizeof(float)),
+                    wrapped_src,
+                    static_cast<uint64>(offsets[i + 1] - offsets[i]))
+                .ok();
+        OP_REQUIRES_ASYNC(context, success,
+                          errors::Internal("D2H memcpy failed to be enqueued."),
+                          done);
 
-        LOG(INFO) << "Launching cudaMemcpyAsync on copy_stream";
-        CHECK(cudaMemcpyAsync(
-                  static_cast<void *>(data + offsets[i] / sizeof(float)),
-                  // input_buffer.opaque(),
-                  static_cast<void *>(input_buffer),
-                  /*size in bytes to copy*/ offsets[i + 1] - offsets[i],
-                  cudaMemcpyDeviceToHost, copy_stream) == cudaSuccess);
+        // LOG(INFO) << "Launching cudaMemcpyAsync on copy_stream";
+        // CHECK(cudaMemcpy(
+        //                       static_cast<void *>(data + offsets[i] /
+        //                       sizeof(float)),
+        //                       // input_buffer.opaque(),
+        //                       static_cast<void *>(input_buffer),
+        //                       /*size in bytes to copy*/ offsets[i + 1] -
+        //                       offsets[i],
+        //                       // cudaMemcpyDeviceToHost) == cudaSuccess);
+        // cudaMemcpyDefault) == cudaSuccess);
+
+        // CHECK(cudaMemcpyAsync(
+        //           static_cast<void *>(data + offsets[i] / sizeof(float)),
+        //           // input_buffer.opaque(),
+        //           static_cast<void *>(input_buffer),
+        //           /*size in bytes to copy*/ offsets[i + 1] - offsets[i],
+        //           cudaMemcpyDeviceToHost, copy_stream) == cudaSuccess);
         // CHECK(cudaMemcpyAsync(
         //                       static_cast<void *>(data),
         //                       // input_buffer.opaque(),
@@ -203,24 +230,26 @@ public:
       // __host__ ​cudaError_t cudaStreamAddCallback ( cudaStream_t stream,
       // cudaStreamCallback_t callback, void* userData, unsigned int  flags )
 
-      const auto StreamCallback = [this, wrapped_callback](cudaStream_t stream,
-                                                           cudaError_t status,
-                                                           void *userData) {
-        CHECK(status == cudaSuccess);
-        wrapped_callback();
-        return;
-      };
+      // const auto StreamCallback = [this, wrapped_callback](cudaStream_t
+      // stream,
+      //                                                      cudaError_t
+      //                                                      status, void
+      //                                                      *userData) {
+      //   CHECK(status == cudaSuccess);
+      //   wrapped_callback();
+      //   return;
+      // };
 
-      LOG(INFO) << "Synchronizing on copy_stream...";
-      CHECK(cudaStreamSynchronize(copy_stream) == cudaSuccess);
-      LOG(INFO) << "Synchronzied.";
+      // LOG(INFO) << "Synchronizing on copy_stream...";
+      // CHECK(cudaStreamSynchronize(copy_stream) == cudaSuccess);
+      // LOG(INFO) << "Synchronzied.";
 
       // Unref.
       // for (int i = 0; i < num_tensors; ++i) {
       //   refs[i]->Unref();
       // }
 
-      wrapped_callback();
+      // wrapped_callback();
 
       // LOG(INFO) << "Adding a callback to copy_stream";
       // CHECK(cudaStreamAddCallback(
@@ -229,8 +258,8 @@ public:
       //           /*userData=*/nullptr,
       //           /*flags=*/0) == cudaSuccess);
 
-      // context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
-      //     stream, wrapped_callback);
+      context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
+          stream, wrapped_callback);
     }
   }
 
