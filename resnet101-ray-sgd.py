@@ -130,11 +130,11 @@ class SGDWorker(object):
             assert(num_grads == 314)
 
         # Ops for reading grads with the right control deps
-        self.first_device_grads = []
+        self.grads_out_readonly = []
         for j in range(num_grads):
             grad = self.per_device_grads[0][j]
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
-                self.first_device_grads.append(tf.identity(grad))
+                self.grads_out_readonly.append(tf.identity(grad))
 
         if args.plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
@@ -204,7 +204,7 @@ class SGDWorker(object):
 
     def compute_gradients(self, args):
         start = time.time()
-        fetches = self.sess.run(self.first_device_grads)
+        fetches = self.sess.run(self.grads_out_readonly)
         if args.verbose:
             print("compute grad interior time", time.time() - start)
         return fetches
@@ -212,7 +212,7 @@ class SGDWorker(object):
     def apply_gradients(self, avg_grads, args):
         start = time.time()
         result = {
-            g: avg_grads[i] for (i, g) in enumerate(self.first_device_grads)
+            g: avg_grads[i] for (i, g) in enumerate(self.per_device_grads[0])
         }
         self.sess.run(self.apply_op, feed_dict=result)
         if args.verbose:
