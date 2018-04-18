@@ -109,26 +109,27 @@ class SGDWorker(object):
         self.models = models
         if num_devices == 1:
            assert not max_bytes, "Not supported with 1 GPU"
-           self.per_device_grads_and_vars = grad_ops
+           self.packed_grads_and_vars = grad_ops
         elif all_reduce_alg:
             if max_bytes:
                 from tfbench import modified_allreduce
-                self.per_device_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
+                self.packed_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)),
                     agg_small_grads_max_bytes=max_bytes,
                     agg_small_grads_max_group=9999)
             else:
-                self.per_device_grads_and_vars = allreduce.sum_gradients_all_reduce(
+                self.packed_grads_and_vars = allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
-        self.per_device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.per_device_grads_and_vars]
+        self.per_device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.packed_grads_and_vars]
         assert(len(self.per_device_grads) == num_devices)
-        num_grads = len(self.per_device_grads_and_vars[0])
+        num_grads = len(self.packed_grads_and_vars[0])
         if max_bytes:
             assert(num_grads < 314)
             print("Packed grads => {} tensors".format(num_grads))
         else:
             assert(num_grads == 314)
 
+        # Ops for reading grads with the right control deps
         self.first_device_grads = []
         for j in range(num_grads):
             grad = self.per_device_grads[0][j]
@@ -155,15 +156,19 @@ class SGDWorker(object):
             unpacked_gv = []
             self.plasma_out_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
+            packed_plasma_grads = []
+            for j in range(num_grads):
+                grad_ph = memcpy_plasma_module.plasma_to_tensor(
+                    self.plasma_out_grads_oids[j],
+                    plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
+                    plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
+                grad_ph = tf.reshape(grad_ph, self.packed_grads_and_vars[0][j][0].shape)
+                print("Packed tensor", grad_ph)
+                packed_plasma_grads.append(grad_ph)
             for i in range(num_devices):
                 per_device = []
-                for j, (g, v) in enumerate(self.per_device_grads_and_vars[i]):
-                    grad_ph = memcpy_plasma_module.plasma_to_tensor(
-                        self.plasma_out_grads_oids[j],
-                        plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
-                        plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                    grad_ph = tf.reshape(grad_ph, g.shape)
-                    print("Packed tensor", grad_ph)
+                for j, (g, v) in enumerate(self.packed_grads_and_vars[i]):
+                    grad_ph = packed_plasma_grads[j]
                     per_device.append((grad_ph, v))
                 unpacked_gv.append(per_device)
 
@@ -171,20 +176,20 @@ class SGDWorker(object):
                 unpacked_gv = allreduce.unpack_small_tensors(unpacked_gv, packing_vals)
 
         elif max_bytes:
-            unpacked_gv = allreduce.unpack_small_tensors(self.per_device_grads_and_vars, packing_vals)
+            unpacked_gv = allreduce.unpack_small_tensors(self.packed_grads_and_vars, packing_vals)
         else:
-            unpacked_gv = self.per_device_grads_and_vars
+            unpacked_gv = self.packed_grads_and_vars
 
-        # Same shape as per_device_grads_and_vars
+        # Same shape as packed_grads_and_vars
         assert len(unpacked_gv) == num_devices
         assert len(unpacked_gv[0]) == 314
         assert len(unpacked_gv[0][0]) == 2
 
         apply_ops = []
-        to_apply = self.first_device_grads
+        to_apply = unpacked_gv[0]
         for ix, m in enumerate(models):
             apply_ops.append(m.optimizer.apply_gradients(
-                [(g, v) for (g, (_, v)) in zip(to_apply, unpacked_gv[ix])]))
+                [(g, v) for ((g, _), (_, v)) in zip(to_apply, unpacked_gv[ix])]))
         self.apply_op = tf.group(*apply_ops)
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
