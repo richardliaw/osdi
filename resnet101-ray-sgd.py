@@ -112,7 +112,6 @@ class SGDWorker(object):
            self.packed_grads_and_vars = grad_ops
         elif all_reduce_alg:
             if max_bytes:
-                import ipdb; ipdb.set_trace()
                 from tfbench import modified_allreduce
                 self.packed_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)),

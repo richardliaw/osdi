@@ -143,7 +143,6 @@ def pack_small_tensors(tower_grads, max_bytes=0):
 
   print("After packing")
   print_stats(new_sizes)
-  import ipdb; ipdb.set_trace()
   num_gv = len(orig_grads)
   packing = {}
   if len(small_ranges):
