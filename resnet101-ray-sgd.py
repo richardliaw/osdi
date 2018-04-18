@@ -36,7 +36,7 @@ class MockDataset():
 
 
 class TFBenchModel(object):
-    def __init__(self, batch=64):
+    def __init__(self, batch=64, use_cpus=False):
         image_shape = [batch, 224, 224, 3]
         labels_shape = [batch]
 
@@ -59,7 +59,7 @@ class TFBenchModel(object):
             name='synthetic_labels')
 
         self.model = model_config.get_model_config("resnet101", MockDataset())
-        logits, aux = self.model.build_network(self.inputs, data_format="NCHW")
+        logits, aux = self.model.build_network(self.inputs, data_format=use_cpus and "NHWC" or "NCHW")
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=self.labels)
         self.loss = tf.reduce_mean(loss, name='xentropy-loss')
         self.optimizer = tf.train.GradientDescentOptimizer(1e-6)
@@ -95,7 +95,7 @@ class SGDWorker(object):
         for device_idx in range(num_devices):
             with tf.device(device_tmpl % device_idx):
                 with tf.variable_scope("device_%d" % device_idx):
-                    model = model_cls(batch=batch_size)
+                    model = model_cls(batch=batch_size, use_cpus=use_cpus)
                     models += [model]
                     model.grads = [
                         t for t in model.optimizer.compute_gradients(model.loss)
@@ -176,44 +176,48 @@ class SGDWorker(object):
                            tf.local_variables_initializer())
         self.sess.run(init_op)
 
-    def compute_apply(self, write_timeline):
-        run_timeline(self.sess, self.apply_op, write_timeline=write_timeline, name="compute_apply")
+    def compute_apply(self, args):
+        run_timeline(self.sess, self.apply_op, write_timeline=args.write_timeline, name="compute_apply")
 
-    def compute_gradients(self, verbose):
+    def compute_apply_split(self, args):
+        grad = self.compute_gradients(args)
+        self.apply_gradients(grad, args)
+
+    def compute_gradients(self, args):
         start = time.time()
         fetches = self.sess.run(self.per_device_grads)
-        if verbose:
+        if args.verbose:
             print("compute grad interior time", time.time() - start)
         return fetches[0]
 
-    def apply_gradients(self, avg_grads, verbose):
+    def apply_gradients(self, avg_grads, args):
         start = time.time()
         result = {}
         for per_device_grads_and_vars in self.per_device_grads_and_vars:
             m = {per_device_grads_and_vars[j][0]: grad for j, grad in enumerate(avg_grads)}
             result.update(m)
         self.sess.run(self.apply_op, feed_dict=result)
-        if verbose:
+        if args.verbose:
             print("apply grad interior time", time.time() - start)
 
-    def compute_gradients_to_plasma_direct(self, verbose, write_timeline):
+    def compute_gradients_to_plasma_direct(self, args):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
         start = time.time()
         fetches = run_timeline(self.sess, self.plasma_in_grads, feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
-        }, write_timeline=write_timeline, name="grads_plasma_direct")
-        if verbose:
+        }, write_timeline=args.write_timeline, name="grads_plasma_direct")
+        if args.verbose:
             print("compute grad plasma interior time", time.time() - start)
         return plasma_in_grads_oids
 
-    def apply_gradients_from_plasma_direct(self, avg_grads_oids, verbose):
+    def apply_gradients_from_plasma_direct(self, avg_grads_oids, args):
         start = time.time()
         feed = {
             ph: oid for (ph, oid) in zip(self.plasma_out_grads_oids, avg_grads_oids)
         }
         self.sess.run(self.apply_op, feed_dict=feed)
-        if verbose:
+        if args.verbose:
             print("apply grad plasma interior time", time.time() - start)
 
 
@@ -224,16 +228,20 @@ def average_gradients(grads):
     return out
 
 
-def do_sgd_step(actors, local_only, write_timeline, verbose, plasma_op):
-    if local_only:
-        ray.get([a.compute_apply.remote(write_timeline) for a in actors])
+def do_sgd_step(actors, args):
+    if args.local_only:
+        if split:
+            ray.get([a.compute_apply_split.remote(args.verbose) for a in actors])
+        else:
+            ray.get([a.compute_apply.remote(args.write_timeline) for a in actors])
     else:
+        assert not args.split
         start = time.time()
         if plasma_op:
-            grads = ray.get([a.compute_gradients_to_plasma_direct.remote(verbose, write_timeline) for a in actors])
+            grads = ray.get([a.compute_gradients_to_plasma_direct.remote(args) for a in actors])
         else:
-            grads = ray.get([a.compute_gradients.remote(verbose) for a in actors])
-        if verbose:
+            grads = ray.get([a.compute_gradients.remote(args) for a in actors])
+        if args.verbose:
             print("compute all grads time", time.time() - start)
         start = time.time()
         if len(actors) == 1:
@@ -242,15 +250,15 @@ def do_sgd_step(actors, local_only, write_timeline, verbose, plasma_op):
         else:
             # TODO(ekl) replace with allreduce
             avg_grad = average_gradients(grads)
-        if verbose:
+        if args.verbose:
             print("distributed allreduce time", time.time() - start)
         start = time.time()
         if plasma_op:
             print("TODO apply grads crashes with plasma op, skipping for now")
-#            ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, verbose) for a in actors])
+#            ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, args) for a in actors])
         else:
-            ray.get([a.apply_gradients.remote(avg_grad, verbose) for a in actors])
-        if verbose:
+            ray.get([a.apply_gradients.remote(avg_grad, args) for a in actors])
+        if args.verbose:
             print("apply all grads time", time.time() - start)
 
 
@@ -275,6 +283,8 @@ parser.add_argument("--hugepages", action="store_true",
     help="Whether to use hugepages")
 parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
+parser.add_argument("--split", action="store_true",
+    help="Whether to split compute and apply in local only mode.")
 parser.add_argument("--plasma-op", action="store_true",
     help="Whether to use the plasma TF op.")
 parser.add_argument("--use-cpus", action="store_true",
@@ -334,5 +344,5 @@ if __name__ == "__main__":
     for i in range(10):
         start = time.time()
         print("Distributed sgd step", i)
-        do_sgd_step(actors, args.local_only, args.timeline, args.verbose, args.plasma_op)
+        do_sgd_step(actors, args.local_only, args.timeline, args.verbose, args.plasma_op, args.split)
         print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
