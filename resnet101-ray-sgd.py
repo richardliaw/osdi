@@ -135,7 +135,7 @@ class SGDWorker(object):
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                 self.first_device_grads.append(tf.identity(grad))
 
-        if plasma_op:
+        if args.plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
 
             # For fetching grads -> plasma
