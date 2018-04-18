@@ -126,9 +126,13 @@ class SGDWorker(object):
             assert(num_grads == 314)
 
         self.first_device_grads = []
-        for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
+        ix = 0  # round robin partition fetches
+        for j in range(num_grads):
+            grad = self.per_device_grads[ix][j]
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                 self.first_device_grads.append(tf.identity(grad))
+            ix += 1
+            ix %= num_devices
 
         if plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
