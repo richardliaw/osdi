@@ -180,11 +180,7 @@ class SGDWorker(object):
         assert len(unpacked_gv[0][0]) == 2
 
         apply_ops = []
-        if use_cpus:
-            to_apply = self.first_device_grads
-        else:
-            with tf.device(models[0].device):
-                to_apply = [nccl.broadcast(g) for g in self.first_device_grads]
+        to_apply = self.first_device_grads
         for ix, m in enumerate(models):
             apply_ops.append(m.optimizer.apply_gradients(
                 [(g, v) for (g, (_, v)) in zip(to_apply, unpacked_gv[ix])]))
