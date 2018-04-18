@@ -21,6 +21,7 @@ def build_worker_cmd(kwargs):
 
 def build_ps_cmd(kwargs):
     kwargs = copy.deepcopy(kwargs)
+    del kwargs["num_gpus"]
     kwargs.update({"job_name": "ps", "local_parameter_device": "cpu"})
     root = ["CUDA_VISIBLE_DEVICES=", "python", "tf_cnn_benchmarks.py"
             ] + to_argv(kwargs)
