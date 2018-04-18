@@ -69,7 +69,7 @@ def sum_gradients_all_reduce(dev_prefixes,
     tower_grads, packing = pack_small_tensors(
         tower_grads,
         max_bytes=agg_small_grads_max_bytes)
-        
+
   else:
     packing = None
   reduced_gv_list = []
@@ -99,9 +99,9 @@ def pack_small_tensors(tower_grads, max_bytes=0):
   sizes = [4 * g.shape.num_elements() for g in orig_grads]
   print("Before packing - avg size %f, median size %f" % (
     np.mean(sizes), np.median(sizes)))
-  import ipdb; ipdb.set_trace()
   small_ranges = []
   large_indices = []
+  new_sizes = []
 
   def end_interval(indices, small_ranges, large_indices):
     if len(indices) > 1:
@@ -114,12 +114,17 @@ def pack_small_tensors(tower_grads, max_bytes=0):
   for i, s in enumerate(sizes):
     if cur_size > max_bytes:
       end_interval(cur_range, small_ranges, large_indices)
+      new_sizes += [cur_size]
       cur_range = []
       cur_size = 0
     cur_range += [i]
     cur_size += s
   end_interval(cur_range, small_ranges, large_indices)
+  new_sizes += [cur_size]
 
+  print("After packing - avg size %f, median size %f, total %f" % (
+    np.mean(new_sizes), np.median(new_sizes), sum(new_sizes)))
+  import ipdb; ipdb.set_trace()
   if len(small_ranges):
     new_tower_grads = []
     for dev_idx, gv_list in enumerate(tower_grads):
