@@ -58,7 +58,7 @@ class TFBenchModel(object):
             dtype=tf.int32,
             name='synthetic_labels')
 
-        self.model = model_config.get_model_config("vgg11", MockDataset())
+        self.model = model_config.get_model_config("resnet101", MockDataset())
         logits, aux = self.model.build_network(self.inputs, data_format=use_cpus and "NHWC" or "NCHW")
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=self.labels)
         self.loss = tf.reduce_mean(loss, name='xentropy-loss')

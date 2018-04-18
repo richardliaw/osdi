@@ -92,14 +92,14 @@ def print_stats(sizes):
   stats = {
     "avg": np.mean(sizes),
     "median": np.median(sizes),
-    "total": np.sum(sizes)
+    "total size": np.sum(sizes)
   }
-  print("Stats" + ", ".join(
+  print("Stats " + ", ".join(
     ["%s: %s" % (k, sizeof_fmt(v)) for k, v in stats.items()]))
   other_stats = {
     "len": len(sizes)
   }
-  print("%s: %f" % (k, v) for k, v in other_stats.items())
+  print(", ".join(["%s: %f" % (k, v) for k, v in other_stats.items()]))
 
 
 def pack_small_tensors(tower_grads, max_bytes=0):
@@ -130,7 +130,7 @@ def pack_small_tensors(tower_grads, max_bytes=0):
 
   cur_range = []
   cur_size = 0
-  for i, s in reversed(enumerate(sizes)):
+  for i, s in reversed(list(enumerate(sizes))):
     if cur_size > max_bytes:
       end_interval(cur_range, small_ranges, large_indices)
       new_sizes.insert(0, cur_size)
@@ -142,8 +142,10 @@ def pack_small_tensors(tower_grads, max_bytes=0):
   new_sizes.insert(0, cur_size)
 
   print("After packing")
-  print_stats(sizes)
+  print_stats(new_sizes)
   import ipdb; ipdb.set_trace()
+  num_gv = len(orig_grads)
+  packing = {}
   if len(small_ranges):
     new_tower_grads = []
     for dev_idx, gv_list in enumerate(tower_grads):
