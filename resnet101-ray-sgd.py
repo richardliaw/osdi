@@ -58,7 +58,7 @@ class TFBenchModel(object):
             dtype=tf.int32,
             name='synthetic_labels')
 
-        self.model = model_config.get_model_config("resnet101", MockDataset())
+        self.model = model_config.get_model_config("vgg11", MockDataset())
         logits, aux = self.model.build_network(self.inputs, data_format=use_cpus and "NHWC" or "NCHW")
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=self.labels)
         self.loss = tf.reduce_mean(loss, name='xentropy-loss')
@@ -108,6 +108,7 @@ class SGDWorker(object):
            self.per_device_grads_and_vars = grad_ops
         elif all_reduce_alg:
             if max_bytes:
+                import ipdb; ipdb.set_trace()
                 from tfbench import modified_allreduce
                 self.per_device_grads_and_vars, packing_vals = modified_allreduce.sum_gradients_all_reduce(
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)),
