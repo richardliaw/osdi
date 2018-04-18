@@ -37,9 +37,10 @@ class MockDataset():
 
 
 class TFBenchModel(object):
-    def __init__(self, batch=64, use_cpus=False):
+    def __init__(self, batch=64, use_cpus=False, device=""):
         image_shape = [batch, 224, 224, 3]
         labels_shape = [batch]
+        self.device = device
 
         # Synthetic image should be within [0, 255].
         images = tf.truncated_normal(
@@ -94,9 +95,10 @@ class SGDWorker(object):
         else:
             device_tmpl = "/gpu:%d"
         for device_idx in range(num_devices):
-            with tf.device(device_tmpl % device_idx):
+            device = device_tmpl % device_idx
+            with tf.device(device):
                 with tf.variable_scope("device_%d" % device_idx):
-                    model = model_cls(batch=batch_size, use_cpus=use_cpus)
+                    model = model_cls(batch=batch_size, use_cpus=use_cpus, device=device)
                     models += [model]
                     model.grads = [
                         t for t in model.optimizer.compute_gradients(model.loss)
@@ -127,13 +129,10 @@ class SGDWorker(object):
             assert(num_grads == 314)
 
         self.first_device_grads = []
-        ix = 0  # round robin partition fetches
         for j in range(num_grads):
-            grad = self.per_device_grads[ix][j]
+            grad = self.per_device_grads[0][j]
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                 self.first_device_grads.append(tf.identity(grad))
-            ix += 1
-            ix %= num_devices
 
         if plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
@@ -184,7 +183,8 @@ class SGDWorker(object):
         if use_cpus:
             to_apply = self.first_device_grads
         else:
-            to_apply = [nccl.broadcast(g) for g in self.first_device_grads]
+            with tf.device(models[0].device):
+                to_apply = [nccl.broadcast(g) for g in self.first_device_grads]
         for ix, m in enumerate(models):
             apply_ops.append(m.optimizer.apply_gradients(
                 [(g, v) for (g, (_, v)) in zip(to_apply, unpacked_gv[ix])]))
