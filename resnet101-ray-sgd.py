@@ -230,7 +230,7 @@ def average_gradients(grads):
 
 def do_sgd_step(actors, args):
     if args.local_only:
-        if split:
+        if args.split:
             ray.get([a.compute_apply_split.remote(args.verbose) for a in actors])
         else:
             ray.get([a.compute_apply.remote(args.write_timeline) for a in actors])
