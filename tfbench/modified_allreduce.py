@@ -82,11 +82,30 @@ def sum_gradients_all_reduce(dev_prefixes,
   new_tower_grads = [list(x) for x in zip(*reduced_gv_list)]
   return new_tower_grads, packing
 
+def print_stats(sizes):
+  def sizeof_fmt(num, suffix='B'):
+    for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Yi', suffix)
+  stats = {
+    "avg": np.mean(sizes),
+    "median": np.median(sizes),
+    "total": np.sum(sizes)
+  }
+  print("Stats" + ", ".join(
+    ["%s: %s" % (k, sizeof_fmt(v)) for k, v in stats.items()]))
+  other_stats = {
+    "len": len(sizes)
+  }
+  print("%s: %f" % (k, v) for k, v in other_stats.items())
 
 
 def pack_small_tensors(tower_grads, max_bytes=0):
-  """Concatenate gradients together in a more intelligent manner.
+  """Concatenate gradients together more intelligently.
 
+  Does binpacking
   Args:
     tower_grads: List of lists of (gradient, variable) tuples.
     max_bytes: Int giving max number of bytes in a tensor that
@@ -97,33 +116,33 @@ def pack_small_tensors(tower_grads, max_bytes=0):
   # Check to make sure sizes are accurate; not entirely important
   assert all(g.dtype == tf.float32 for g in orig_grads)
   sizes = [4 * g.shape.num_elements() for g in orig_grads]
-  print("Before packing - avg size %f, median size %f" % (
-    np.mean(sizes), np.median(sizes)))
+  print("Before packing")
+  print_stats(sizes)
   small_ranges = []
   large_indices = []
   new_sizes = []
 
   def end_interval(indices, small_ranges, large_indices):
     if len(indices) > 1:
-      small_ranges += [[indices[0], indices[-1]]]
+      small_ranges.insert(0, [indices[0], indices[-1]])
     else:
-      large_indices += indices
+      large_indices.insert(0, indices[0])
 
   cur_range = []
   cur_size = 0
-  for i, s in enumerate(sizes):
+  for i, s in reversed(enumerate(sizes)):
     if cur_size > max_bytes:
       end_interval(cur_range, small_ranges, large_indices)
-      new_sizes += [cur_size]
+      new_sizes.insert(0, cur_size)
       cur_range = []
       cur_size = 0
-    cur_range += [i]
+    cur_range.insert(0, i)
     cur_size += s
   end_interval(cur_range, small_ranges, large_indices)
-  new_sizes += [cur_size]
+  new_sizes.insert(0, cur_size)
 
-  print("After packing - avg size %f, median size %f, total %f" % (
-    np.mean(new_sizes), np.median(new_sizes), sum(new_sizes)))
+  print("After packing")
+  print_stats(sizes)
   import ipdb; ipdb.set_trace()
   if len(small_ranges):
     new_tower_grads = []
