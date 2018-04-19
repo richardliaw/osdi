@@ -281,8 +281,8 @@ class SGDWorker(object):
 
 
 class ParameterServer(object):
-    def __init__(self, shard_shape, config=None):
-        self.num_sgd_workers = config["num_workers"]
+    def __init__(self, shard_shape, num_workers):
+        self.num_sgd_workers = num_workers
         self.accumulated = np.zeros(shard_shape)
         self.acc_counter = 0
 
@@ -463,7 +463,7 @@ if __name__ == "__main__":
     if args.num_actors > 1:
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
         RemotePS = ray.remote(ParameterServer)
-        ps_list = [RemotePS.remote(shape) for shape in shard_shapes]
+        ps_list = [RemotePS.remote(shape, len(actors)) for shape in shard_shapes]
         for i in range(10):
             start = time.time()
             print("Distributed sgd step", i)
