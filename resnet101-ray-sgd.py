@@ -362,19 +362,19 @@ def distributed_sgd_step(actors, ps_list, args):
     ]
 
     # Preallocate object ids that param servers will write new weights to
-    weight_shard_oids = [np.random.bytes(20) for _ in ps_list]
+    accum_shard_ids = [np.random.bytes(20) for _ in ps_list]
 
     # Kick off the fused compute grad / update weights tf run for each actor
     runs = []
     for actor, grad_shard_oids in zip(actors, grad_shard_oids_list):
-        run = actor.ps_compute_apply.remote(grad_shard_oids, weight_shard_oids)
+        run = actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
         runs.append(run)
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
-    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, weight_shard_oids)):
+    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids)):
         for grad_shard_oids in grad_shard_oids_list:
-            ps.add.remote(grad_shard_oids[j])
+            ps.add.remote(ray.local_scheduler.ObjectID(grad_shard_oids[j]))
         ps.get.remote(weight_shard_oid)
 
     # Wait for the round to finish (optional)
