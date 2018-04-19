@@ -196,7 +196,9 @@ class SGDWorker(object):
         self.sess.run(init_op)
 
     def compute_apply(self, args):
-        run_timeline(self.sess, self.apply_op, write_timeline=args.timeline, name="compute_apply")
+        run_timeline(
+            self.sess, [self.apply_op, self.nccl_control_out],
+            write_timeline=args.timeline, name="compute_apply")
 
     def compute_apply_split(self, args):
         grad = self.compute_gradients(args)
@@ -204,7 +206,7 @@ class SGDWorker(object):
 
     def compute_gradients(self, args):
         start = time.time()
-        fetches = self.sess.run(self.per_device_grads[0] + [self.nccl_control_out])
+        fetches = self.sess.run(list(self.per_device_grads[0]) + [self.nccl_control_out])
         if args.verbose:
             print("compute grad interior time", time.time() - start)
         return fetches
