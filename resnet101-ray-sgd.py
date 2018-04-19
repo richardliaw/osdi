@@ -287,8 +287,9 @@ class ParameterServer(object):
         self.acc_counter = 0
 
     def add(self, grad_shard_id):
-        oid = ray.local_scheduler.ObjectID(grad_shard_id)
-        grads = ray.get(oid)
+        oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
+        [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
+        grads = np.frombuffer(raw_grads, dtype=np.float32)
         self.accumulated += grads
         self.acc_counter += 1
 
@@ -439,7 +440,7 @@ if __name__ == "__main__":
     if args.hugepages:
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/")
     else:
-        ray.init()
+        ray.init(redirect_output=False)
     if args.warmup:
         warmup()
     model = TFBenchModel
