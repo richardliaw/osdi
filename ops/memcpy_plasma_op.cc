@@ -162,7 +162,7 @@ public:
       }
       // TODO(zongheng): does std::move() give better performance?
       context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
-          d2h_stream, wrapped_callback);
+          d2h_stream, std::move(wrapped_callback));
     }
   }
 
@@ -265,14 +265,50 @@ public:
         }
       }
 
-      // Important.  See note in T2P op.
+      // #define PLASMA_CLIENT_DOES_NOT_EXIST 3
+      // #define PLASMA_CLIENT_LOCAL 0
 
-      // 2018-04-19 05:48:08.717605: E
-      // tensorflow/stream_executor/cuda/cuda_driver.cc:990] error registering
-      // host memory at 0x7f62283af040:
-      // CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED
-      //                                                                                     2018-04-19 05:48:08.717644: F memcpy_plasma_op.cc:271] Check failed: stream_executor->HostMemoryRegister( const_cast<void *>(static_cast<const void *>(plasma_data)), static_cast<uint64>(size_in_bytes))
-      //                                                                                       Aborted (core dumped)
+      //       // Launch async fetch.
+      //       {
+      //         mutex_lock lock(mu_);
+      //         LOG(INFO) << "Launching Fetch()";
+      //         ARROW_CHECK_OK(client_.Fetch(/*num_object_ids=*/1,
+      //         &object_id)); LOG(INFO) << "Done launching Fetch()";
+      //       }
+
+      //       std::function<void()> WaitForTransfer = [context, this,
+      //       object_id,
+      //                                                WaitForTransfer]() ->
+      //                                                void {
+      //         int object_status;
+      //         {
+      //           mutex_lock lock(mu_);
+      //           LOG(INFO) << "Launching Info()";
+      //           ARROW_CHECK_OK(client_.Info(object_id, &object_status));
+      //           LOG(INFO) << "Done launching Info()";
+      //         }
+      //         CHECK(object_status != PLASMA_CLIENT_DOES_NOT_EXIST);
+
+      //         if (object_status == PLASMA_CLIENT_LOCAL) {
+      //           LOG(INFO) << "Object is local!";
+      //           CHECK(0);
+      //           // TODO(zongheng):  do real work;
+      //         } else {
+
+      //           LOG(INFO) << "Object still not local, status: " <<
+      //           object_status; std::function<void()> new_func =
+      //           WaitForTransfer; context->device()
+      //               ->tensorflow_gpu_device_info()
+      //               ->event_mgr->ThenExecute(h2d_stream, new_func);
+      //         }
+      //       };
+
+      //       context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
+      //           h2d_stream, WaitForTransfer);
+
+      // Important.  See note in T2P op.
+      // We don't check the return status since the host memory might've been
+      // already registered (e.g., the TensorToPlasmaOp might've been run).
       stream_executor->HostMemoryRegister(
           const_cast<void *>(static_cast<const void *>(plasma_data)),
           static_cast<uint64>(size_in_bytes));
@@ -287,6 +323,12 @@ public:
       OP_REQUIRES_ASYNC(context, success,
                         errors::Internal("H2D memcpy failed to be enqueued."),
                         done);
+
+      // Without this sync the main compute stream might proceed to use the
+      // Tensor buffer, but its contents might still be in-flight from our
+      // h2d_stream.
+      CHECK(orig_stream->ThenWaitFor(h2d_stream).ok());
+
       context->device()->tensorflow_gpu_device_info()->event_mgr->ThenExecute(
           h2d_stream, std::move(done));
     }
