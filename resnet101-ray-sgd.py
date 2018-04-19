@@ -234,7 +234,7 @@ class SGDWorker(object):
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="compute_apply_plasma")
 
-    def ps_compute_apply(out_grad_shard_oids, agg_grad_shard_oids):
+    def ps_compute_apply(self, out_grad_shard_oids, agg_grad_shard_oids):
         feed_dict = {
             ph: oid
             for (ph, oid) in zip(self.plasma_in_grads_oids, out_grad_shard_oids)
@@ -354,26 +354,26 @@ def do_sgd_step(actors, args):
 
 def distributed_sgd_step(actors, ps_list, args):
     # Preallocate object ids that actors will write gradient shards to
-    grad_shard_oids = [
-        [np.random.bytes(20) for _ in range(NUM_GRAD_SHARDS)]
-        for _ in range(NUM_ACTORS)
+    grad_shard_oids_list = [
+        [np.random.bytes(20) for _ in ps_list]
+        for _ in actors
     ]
 
     # Preallocate object ids that param servers will write new weights to
-    weight_shard_oids = [np.random.bytes(20) for _ in range(NUM_GRAD_SHARDS)]
+    weight_shard_oids = [np.random.bytes(20) for _ in ps_list]
 
     # Kick off the fused compute grad / update weights tf run for each actor
     runs = []
-    for i in range(NUM_ACTORS):
-        run = actors[i].compute_update.remote(grad_shard_oids[i], weight_shard_oids)
+    for actor, grad_shard_oids in zip(actors, grad_shard_oids_list):
+        run = actor.ps_compute_apply.remote(grad_shard_oids, weight_shard_oids)
         runs.append(run)
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
-    for j in range(NUM_GRAD_SHARDS):
-        for i in range(NUM_ACTORS):
-            ps[j].add.remote(grad_shard_oids[i][j])
-        ps[j].get.remote(weight_shard_oids[i])
+    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, weight_shard_oids)):
+        for grad_shard_oids in grad_shard_oids_list:
+            ps.add.remote(grad_shard_oids[j])
+        ps.get.remote(weight_shard_oid)
 
     # Wait for the round to finish (optional)
     ray.get(runs)
@@ -457,13 +457,19 @@ if __name__ == "__main__":
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)
         for i in range(args.num_actors)]
-
-    shard_shapes = ray.get(actors[0].shard_shapes.remote())
-    RemotePS = ray.remote(ParameterServer)
-    ps_list = [RemotePS.remote(shape) for shape in shard_shapes]
     print("Test config: " + str(args))
-    for i in range(10):
-        start = time.time()
-        print("Distributed sgd step", i)
-        do_sgd_step(actors, args)
-        print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
+    if args.num_actors > 1:
+        shard_shapes = ray.get(actors[0].shard_shapes.remote())
+        RemotePS = ray.remote(ParameterServer)
+        ps_list = [RemotePS.remote(shape) for shape in shard_shapes]
+        for i in range(10):
+            start = time.time()
+            print("Distributed sgd step", i)
+            distributed_sgd_step(actors, ps_list, args)
+            print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
+    else:
+        for i in range(10):
+            start = time.time()
+            print("Distributed sgd step", i)
+            do_sgd_step(actors, args)
+            print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
