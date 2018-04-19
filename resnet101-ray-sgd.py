@@ -286,7 +286,9 @@ class ParameterServer(object):
         self.accumulated = np.zeros(shard_shape)
         self.acc_counter = 0
 
-    def add(self, grads):
+    def add(self, grad_shard_id):
+        oid = ray.local_scheduler.ObjectID(grad_shard_id)
+        grads = ray.get(oid)
         self.accumulated += grads
         self.acc_counter += 1
 
@@ -374,7 +376,7 @@ def distributed_sgd_step(actors, ps_list, args):
     # run concurrently with the actor methods above.
     for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids)):
         for grad_shard_oids in grad_shard_oids_list:
-            ps.add.remote(ray.local_scheduler.ObjectID(grad_shard_oids[j]))
+            ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
 
     # Wait for the round to finish (optional)
