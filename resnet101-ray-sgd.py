@@ -294,7 +294,7 @@ class ParameterServer(object):
         assert self.acc_counter == self.num_sgd_workers
         oid = ray.local_scheduler.ObjectID(object_id)
         worker = ray.worker.global_worker
-        worker.put_object(oid, worker)
+        worker.put_object(oid, self.accumulated)
         worker.put_index += 1
 
         self.accumulated = np.zeros_like(self.accumulated)
