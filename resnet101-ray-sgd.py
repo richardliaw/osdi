@@ -129,11 +129,13 @@ class SGDWorker(object):
             assert(num_grads == 314)
 
         # Ops for reading grads with the right control deps
-        self.grads_out_readonly = []
+        nccl_noops = []
         for j in range(num_grads):
-            grad = self.per_device_grads[0][j]
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
-                self.grads_out_readonly.append(tf.identity(grad))
+                nccl_noops.append(tf.no_op())
+
+        # You must fetch this otherwise the NCCL allreduce will hang
+        self.nccl_control_out = tf.group(*nccl_noops)
 
         if args.plasma_op:
             memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
@@ -143,13 +145,12 @@ class SGDWorker(object):
             self.plasma_in_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
             for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
-                with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
-                    plasma_grad = memcpy_plasma_module.tensor_to_plasma(
-                        [grad],
-                        self.plasma_in_grads_oids[j],
-                        plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
-                        plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                    self.plasma_in_grads.append(plasma_grad)
+                plasma_grad = memcpy_plasma_module.tensor_to_plasma(
+                    [grad],
+                    self.plasma_in_grads_oids[j],
+                    plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
+                    plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
+                self.plasma_in_grads.append(plasma_grad)
 
             # For applying grads <- plasma
             unpacked_gv = []
@@ -203,7 +204,7 @@ class SGDWorker(object):
 
     def compute_gradients(self, args):
         start = time.time()
-        fetches = self.sess.run(self.grads_out_readonly)
+        fetches = self.sess.run(self.per_device_grads[0] + [self.nccl_control_out])
         if args.verbose:
             print("compute grad interior time", time.time() - start)
         return fetches
@@ -229,7 +230,7 @@ class SGDWorker(object):
             for (ph, oid) in zip(self.plasma_out_grads_oids, plasma_oids)
         })
         run_timeline(
-            self.sess, [self.plasma_in_grads, self.apply_op],
+            self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="compute_apply_plasma")
 
@@ -237,7 +238,7 @@ class SGDWorker(object):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
         start = time.time()
-        fetches = run_timeline(self.sess, self.plasma_in_grads, feed_dict={
+        run_timeline(self.sess, self.plasma_in_grads + [self.nccl_control_out], feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
         }, write_timeline=args.timeline, name="grads_plasma_direct")
         if args.verbose:
