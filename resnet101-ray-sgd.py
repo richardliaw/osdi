@@ -121,7 +121,7 @@ class SGDWorker(object):
                     "", grad_ops, 1, all_reduce_alg, 1, list(range(num_devices)))
         self.per_device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.packed_grads_and_vars]
         assert(len(self.per_device_grads) == num_devices)
-        num_grads = len(self.packed_grads_and_vars[0])
+        self.num_grads = num_grads = len(self.packed_grads_and_vars[0])
         if max_bytes:
             assert(num_grads < 314)
             print("Packed grads => {} tensors".format(num_grads))
@@ -270,6 +270,46 @@ class SGDWorker(object):
         if args.verbose:
             print("apply grad plasma interior time", time.time() - start)
 
+    def num_grad_shards(self):
+        return self.num_grads
+
+    def shard_shapes(self):
+        main_gv = self.packed_grads_and_vars[0]
+        return [g.shape for g, _ in main_gv]
+
+
+class ParameterServer(object):
+    def __init__(self, shard_shape, config=None):
+        self.num_sgd_workers = config["num_workers"]
+        self.accumulated = np.zeros(shard_shape)
+        self.acc_counter = 0
+
+    def add(self, grads):
+        self.accumulated += grads
+        self.acc_counter += 1
+
+    def get(self, object_id):
+        assert self.acc_counter == self.num_sgd_workers
+        oid = ray.local_scheduler.ObjectID(object_id)
+        worker = ray.worker.global_worker
+        worker.put_object(oid, worker)
+        worker.put_index += 1
+
+        self.accumulated = np.zeros_like(self.accumulated)
+        self.acc_counter = 0
+
+    def ip(self):
+        return ray.services.get_node_ip_address()
+
+    def pin(self, cpu_id):
+        try:
+            import psutil
+            p = psutil.Process()
+            p.cpu_affinity([cpu_id])
+            print("Setting CPU Affinity to: ", cpu_id)
+        except Exception as e:
+            print(e)
+
 
 def average_gradients(grads):
     out = []
@@ -311,6 +351,32 @@ def do_sgd_step(actors, args):
             ray.get([a.apply_gradients.remote(avg_grad, args) for a in actors])
         if args.verbose:
             print("apply all grads time", time.time() - start)
+
+def distributed_sgd_step(actors, ps_list, args):
+    # Preallocate object ids that actors will write gradient shards to
+    grad_shard_oids = [
+        [np.random.bytes(20) for _ in range(NUM_GRAD_SHARDS)]
+        for _ in range(NUM_ACTORS)
+    ]
+
+    # Preallocate object ids that param servers will write new weights to
+    weight_shard_oids = [np.random.bytes(20) for _ in range(NUM_GRAD_SHARDS)]
+
+    # Kick off the fused compute grad / update weights tf run for each actor
+    runs = []
+    for i in range(NUM_ACTORS):
+        run = actors[i].compute_update.remote(grad_shard_oids[i], weight_shard_oids)
+        runs.append(run)
+
+    # Aggregate the gradients produced by the actors. These operations
+    # run concurrently with the actor methods above.
+    for j in range(NUM_GRAD_SHARDS):
+        for i in range(NUM_ACTORS):
+            ps[j].add.remote(grad_shard_oids[i][j])
+        ps[j].get.remote(weight_shard_oids[i])
+
+    # Wait for the round to finish (optional)
+    ray.get(runs)
 
 
 import argparse
@@ -387,10 +453,14 @@ if __name__ == "__main__":
     actors = [
         RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
-            use_cpus=args.use_cpus, num_devices=args.devices_per_actor, 
+            use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)
         for i in range(args.num_actors)]
+
+    shard_shapes = ray.get(actors[0].shard_shapes.remote())
+    RemotePS = ray.remote(ParameterServer)
+    ps_list = [RemotePS.remote(shape) for shape in shard_shapes]
     print("Test config: " + str(args))
     for i in range(10):
         start = time.time()
