@@ -217,6 +217,22 @@ class SGDWorker(object):
         if args.verbose:
             print("apply grad interior time", time.time() - start)
 
+    def compute_apply_plasma(self, args):
+        plasma_oids = [
+            np.random.bytes(20) for _ in self.plasma_in_grads_oids]
+        feed_dict = {
+            ph: oid
+            for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_oids)
+        }
+        feed_dict.update({
+            ph: oid
+            for (ph, oid) in zip(self.plasma_out_grads_oids, plasma_oids)
+        })
+        run_timeline(
+            self.sess, [self.plasma_in_grads, self.apply_op],
+            feed_dict=feed_dict,
+            write_timeline=args.timeline, name="compute_apply_plasma")
+
     def compute_gradients_to_plasma_direct(self, args):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
@@ -249,7 +265,9 @@ def average_gradients(grads):
 
 def do_sgd_step(actors, args):
     if args.local_only:
-        if args.split:
+        if args.plasma_op:
+            ray.get([a.compute_apply_plasma.remote(args) for a in actors])
+        elif args.split:
             ray.get([a.compute_apply_split.remote(args) for a in actors])
         else:
             ray.get([a.compute_apply.remote(args) for a in actors])
