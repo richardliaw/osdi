@@ -283,13 +283,14 @@ class SGDWorker(object):
 class ParameterServer(object):
     def __init__(self, shard_shape, num_workers):
         self.num_sgd_workers = num_workers
-        self.accumulated = np.zeros(shard_shape)
+        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
 
     def add(self, grad_shard_id):
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
+        print("Adding ", grads.shape, grads.dtype)
         self.accumulated += grads
         self.acc_counter += 1
 
@@ -298,6 +299,7 @@ class ParameterServer(object):
         oid = ray.local_scheduler.ObjectID(object_id)
         worker = ray.worker.global_worker
         worker.put_object(oid, self.accumulated)
+        print("Putting ", self.accumulated.shape, self.accumulated.dtype)
         worker.put_index += 1
 
         self.accumulated = np.zeros_like(self.accumulated)
