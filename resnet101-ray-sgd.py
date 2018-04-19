@@ -234,6 +234,20 @@ class SGDWorker(object):
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="compute_apply_plasma")
 
+    def ps_compute_apply(out_grad_shard_oids, agg_grad_shard_oids):
+        feed_dict = {
+            ph: oid
+            for (ph, oid) in zip(self.plasma_in_grads_oids, out_grad_shard_oids)
+        }
+        feed_dict.update({
+            ph: oid
+            for (ph, oid) in zip(self.plasma_out_grads_oids, agg_grad_shard_oids)
+        })
+        run_timeline(
+            self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
+            feed_dict=feed_dict,
+            write_timeline=args.timeline, name="ps_compute_apply")
+
     def compute_gradients_to_plasma_direct(self, args):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
