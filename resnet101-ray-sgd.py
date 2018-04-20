@@ -23,7 +23,7 @@ def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
             ops, options=run_options, run_metadata=run_metadata,
             feed_dict=feed_dict)
         trace = timeline.Timeline(step_stats=run_metadata.step_stats)
-        outf = "timeline-{}.json".format(name)
+        outf = "timeline-{}-{}.json".format(name, os.getpid())
         trace_file = open(outf, "w")
         print("wrote tf timeline to", os.path.abspath(outf))
         trace_file.write(trace.generate_chrome_trace_format())
