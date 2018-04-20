@@ -138,7 +138,7 @@ class SGDWorker(object):
         self.nccl_control_out = tf.group(*nccl_noops)
 
         if args.plasma_op:
-            memcpy_plasma_module = tf.load_op_library("ops/memcpy_plasma_op.so")
+            memcpy_plasma_module = tf.load_op_library("/home/ubuntu/osdi2018/ops/memcpy_plasma_op.so")
 
             # For fetching grads -> plasma
             self.plasma_in_grads = []
@@ -349,8 +349,8 @@ def do_sgd_step(actors, args):
         else:
             # TODO(ekl) replace with allreduce
             avg_grad = average_gradients(grads)
-        if args.verbose:
-            print("distributed allreduce time", time.time() - start)
+            if args.verbose:
+                print("distributed allreduce time", time.time() - start)
         start = time.time()
         if args.plasma_op:
             ray.get([a.apply_gradients_from_plasma_direct.remote(avg_grad, args) for a in actors])
@@ -407,10 +407,14 @@ parser.add_argument("--hugepages", action="store_true",
     help="Whether to use hugepages")
 parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
+parser.add_argument("--ps", action="store_true",
+    help="Whether to use param server")
 parser.add_argument("--split", action="store_true",
     help="Whether to split compute and apply in local only mode.")
 parser.add_argument("--plasma-op", action="store_true",
     help="Whether to use the plasma TF op.")
+parser.add_argument("--cluster", action="store_true",
+    help="Whether to use a Ray cluster")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
 parser.add_argument("--max-bytes", type=int, default=0,
@@ -439,10 +443,14 @@ def warmup():
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    if args.hugepages:
-        ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/")
+    if args.cluster:
+        redis_address = "localhost:6379"
     else:
-        ray.init(redirect_output=False)
+        redis_address = None
+    if args.hugepages:
+        ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/", redis_address=redis_address)
+    else:
+        ray.init(redirect_output=False, redis_address=redis_address)
     if args.warmup:
         warmup()
     model = TFBenchModel
@@ -465,18 +473,21 @@ if __name__ == "__main__":
             verbose=args.verbose)
         for i in range(args.num_actors)]
     print("Test config: " + str(args))
-    if args.num_actors > 1:
+    if args.ps:
+        print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
         RemotePS = ray.remote(ParameterServer)
         ps_list = [RemotePS.remote(shape, len(actors)) for shape in shard_shapes]
+        print("All actors started")
         for i in range(10):
             start = time.time()
-            print("Distributed sgd step", i)
+            print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
             print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
     else:
+        assert args.num_actors == 1
         for i in range(10):
             start = time.time()
-            print("Distributed sgd step", i)
+            print("Local sgd step", i)
             do_sgd_step(actors, args)
             print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
