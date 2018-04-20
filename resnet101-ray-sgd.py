@@ -91,7 +91,8 @@ class SGDWorker(object):
         tf_session_args = {
             "device_count": {"CPU": num_devices},
             "log_device_placement": False,
-            'gpu_options': tf.GPUOptions(force_gpu_compatible=True),
+            "gpu_options": tf.GPUOptions(force_gpu_compatible=True),
+            "inter_op_parallelism_threads": 128,
         }
         config_proto = tf.ConfigProto(**tf_session_args)
         self.sess = tf.Session(config=config_proto)
