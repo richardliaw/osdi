@@ -19,6 +19,7 @@ from __future__ import print_function
 import collections as pycoll
 import re
 import numpy as np
+import random
 
 from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
@@ -112,6 +113,7 @@ def pack_small_tensors(tower_grads, max_bytes=0):
       may be considered small.
   """
   assert max_bytes >= 0
+  random.shuffle(orig_grads)
   orig_grads = [g for g, _ in tower_grads[0]]
   # Check to make sure sizes are accurate; not entirely important
   assert all(g.dtype == tf.float32 for g in orig_grads)
