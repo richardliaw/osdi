@@ -15,6 +15,13 @@ import ray
 import time
 
 
+def fetch(oids):
+    plasma_ids = [
+        ray.pyarrow.plasma.ObjectID(o) for o in oids
+    ]
+    ray.worker.global_worker.plasma_client.fetch(plasma_ids)
+
+
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
     if write_timeline:
         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -245,6 +252,7 @@ class SGDWorker(object):
             ph: oid
             for (ph, oid) in zip(self.plasma_out_grads_oids, agg_grad_shard_oids)
         })
+        fetch(agg_grad_shard_oids)
         run_timeline(
             self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
             feed_dict=feed_dict,
@@ -287,6 +295,7 @@ class ParameterServer(object):
         self.acc_counter = 0
 
     def add(self, grad_shard_id):
+        fetch([grad_shard_id])
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
@@ -358,6 +367,7 @@ def do_sgd_step(actors, args):
             ray.get([a.apply_gradients.remote(avg_grad, args) for a in actors])
         if args.verbose:
             print("apply all grads time", time.time() - start)
+
 
 def distributed_sgd_step(actors, ps_list, args):
     # Preallocate object ids that actors will write gradient shards to
