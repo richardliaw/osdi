@@ -283,20 +283,25 @@ class SGDWorker(object):
 class ParameterServer(object):
     def __init__(self, shard_shape, num_workers):
         self.num_sgd_workers = num_workers
-        self.accumulated = np.zeros(shard_shape)
+        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
 
-    def add(self, grads):
+    def add(self, grad_shard_id):
+        oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
+        [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
+        grads = np.frombuffer(raw_grads, dtype=np.float32)
         self.accumulated += grads
         self.acc_counter += 1
 
     def get(self, object_id):
+        client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers
-        oid = ray.local_scheduler.ObjectID(object_id)
-        worker = ray.worker.global_worker
-        worker.put_object(oid, self.accumulated)
-        worker.put_index += 1
-
+        oid = ray.pyarrow.plasma.ObjectID(object_id)
+        buff = client.create(
+            oid, self.accumulated.nbytes)
+        wrapper = np.frombuffer(buff, dtype=np.float32)
+        np.copyto(wrapper, self.accumulated)
+        client.seal(oid)
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
 
@@ -374,7 +379,7 @@ def distributed_sgd_step(actors, ps_list, args):
     # run concurrently with the actor methods above.
     for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids)):
         for grad_shard_oids in grad_shard_oids_list:
-            ps.add.remote(ray.local_scheduler.ObjectID(grad_shard_oids[j]))
+            ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
 
     # Wait for the round to finish (optional)
@@ -437,7 +442,7 @@ if __name__ == "__main__":
     if args.hugepages:
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/")
     else:
-        ray.init()
+        ray.init(redirect_output=False)
     if args.warmup:
         warmup()
     model = TFBenchModel
