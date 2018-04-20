@@ -303,7 +303,7 @@ class ParameterServer(object):
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
-        self.accumulated += grads
+#        self.accumulated += grads
         self.acc_counter += 1
 
     def get(self, object_id):
