@@ -139,9 +139,9 @@ class SGDWorker(object):
 
         # Ops for reading grads with the right control deps
         nccl_noops = []
-        for j in range(num_grads):
-            with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
-                nccl_noops.append(tf.no_op())
+        for j in range(num_grads)[::-1]:
+            with tf.control_dependencies(nccl_noops + [dev_grad[j] for dev_grad in self.per_device_grads]):
+                nccl_noops = [tf.no_op()]
 
         # You must fetch this otherwise the NCCL allreduce will hang
         self.nccl_control_out = tf.group(*nccl_noops)
@@ -158,11 +158,12 @@ class SGDWorker(object):
                 grad = self.per_device_grads[ix][j]
                 ix += 1
                 ix %= num_devices  # round robin assignment
-                plasma_grad = memcpy_plasma_module.tensor_to_plasma(
-                    [grad],
-                    self.plasma_in_grads_oids[j],
-                    plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
-                    plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
+                with tf.device(self.models[ix].device):
+                    plasma_grad = memcpy_plasma_module.tensor_to_plasma(
+                        [grad],
+                        self.plasma_in_grads_oids[j],
+                        plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
+                        plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                 self.plasma_in_grads.append(plasma_grad)
 
             # For applying grads <- plasma
@@ -170,11 +171,16 @@ class SGDWorker(object):
             self.plasma_out_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
             packed_plasma_grads = []
+            ix = 0
             for j in range(num_grads):
-                grad_ph = memcpy_plasma_module.plasma_to_tensor(
-                    self.plasma_out_grads_oids[j],
-                    plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
-                    plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
+                ix += 1
+                ix %= num_devices  # round robin assignment
+                with tf.device(self.models[ix].device):
+                    with tf.control_dependencies([self.plasma_in_grads[j]]):
+                        grad_ph = memcpy_plasma_module.plasma_to_tensor(
+                            self.plasma_out_grads_oids[j],
+                            plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
+                            plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                 grad_ph = tf.reshape(grad_ph, self.packed_grads_and_vars[0][j][0].shape)
                 print("Packed tensor", grad_ph)
                 packed_plasma_grads.append(grad_ph)
