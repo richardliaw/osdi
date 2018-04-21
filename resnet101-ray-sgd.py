@@ -139,9 +139,6 @@ class SGDWorker(object):
 
         # Ops for reading grads with the right control deps
         nccl_noops = []
-        for j in range(num_grads)[::-1]:
-            with tf.control_dependencies(nccl_noops + [dev_grad[j] for dev_grad in self.per_device_grads]):
-                nccl_noops = [tf.no_op()]
 
         # You must fetch this otherwise the NCCL allreduce will hang
         self.nccl_control_out = tf.group(*nccl_noops)
@@ -155,7 +152,11 @@ class SGDWorker(object):
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
             ix = 0
             for j in range(num_grads):
-                grad = self.per_device_grads[ix][j]
+                deps = []
+                for i in range(num_devices):
+                    deps.append(self.per_device_grads[i][j])
+                with tf.control_dependencies(deps):
+                    grad = tf.identity(self.per_device_grads[ix][j])
                 ix += 1
                 ix %= num_devices  # round robin assignment
                 with tf.device(self.models[ix].device):
