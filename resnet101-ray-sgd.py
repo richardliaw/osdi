@@ -136,9 +136,6 @@ class SGDWorker(object):
         else:
             assert(num_grads == 314)
 
-        # You must fetch this otherwise the NCCL allreduce will hang
-        self.nccl_control_out = tf.group(*nccl_noops)
-
         if args.plasma_op:
             memcpy_plasma_module = tf.load_op_library("/home/ubuntu/osdi2018/ops/memcpy_plasma_op.so")
 
@@ -197,6 +194,9 @@ class SGDWorker(object):
         for j in range(num_grads):
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                 nccl_noops.append(tf.no_op())
+
+        # You must fetch this otherwise the NCCL allreduce will hang
+        self.nccl_control_out = tf.group(*nccl_noops)
 
         # Same shape as packed_grads_and_vars
         assert len(unpacked_gv) == num_devices
