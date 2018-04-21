@@ -398,7 +398,8 @@ def distributed_sgd_step(actors, ps_list, args):
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
-    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids)):
+    for j, (ps, weight_shard_oid) in list(
+            enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
         for grad_shard_oids in grad_shard_oids_list:
             ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
