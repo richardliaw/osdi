@@ -151,18 +151,22 @@ class SGDWorker(object):
 
             # Build the plasma grad outputs from the NCCL ops
             for j in range(num_grads):
+                prev_nccl_ops = []
+                if j > 0:
+                    for i, device_grads in enumerate(self.per_device_grads):
+                        prev_nccl_ops.append(device_grads[j-1])
                 for i, device_grads in enumerate(self.per_device_grads):
                     grad = device_grads[j]
                     # Make sure to add a control edge from NCCL -> prev TF2Plasma op.
                     # This edge ensures that the previous TF2Plasma will be scheduled
                     # before the next NCCL allreduce.
-#                    if j > 0:
-#                        prev_plasma_op = self.plasma_in_grads[j-1]
-#                        with tf.control_dependencies([prev_plasma_op]):
-#                            grad = tf.identity(grad)
-#                            self.per_device_grads[i][j] = grad
-#                            self.packed_grads_and_vars[i][j] = (
-#                                grad, self.packed_grads_and_vars[i][j][1])
+                    if j > 0:
+                        prev_plasma_op = self.plasma_in_grads[j-1]
+                        with tf.control_dependencies([prev_plasma_op] + prev_nccl_ops):
+                            grad = tf.identity(grad)
+                            self.per_device_grads[i][j] = grad
+                            self.packed_grads_and_vars[i][j] = (
+                                grad, self.packed_grads_and_vars[i][j][1])
                     # Send the first GPU's grad to Plasma
                     if i == 0:
                         plasma_grad = memcpy_plasma_module.tensor_to_plasma(
@@ -202,9 +206,9 @@ class SGDWorker(object):
 
         # Ops for reading grads with the right control deps
         nccl_noops = []
-        for j in range(num_grads):
-            with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
-                nccl_noops.append(tf.no_op())
+        j = num_grads - 1
+        with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
+            nccl_noops.append(tf.no_op())
 
         # You must fetch this otherwise the NCCL allreduce will hang
         self.nccl_control_out = tf.group(*nccl_noops)
