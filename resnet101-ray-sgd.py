@@ -136,12 +136,6 @@ class SGDWorker(object):
         else:
             assert(num_grads == 314)
 
-        # Ops for reading grads with the right control deps
-        nccl_noops = []
-        for j in range(num_grads):
-            with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
-                nccl_noops.append(tf.no_op())
-
         # You must fetch this otherwise the NCCL allreduce will hang
         self.nccl_control_out = tf.group(*nccl_noops)
 
@@ -159,6 +153,16 @@ class SGDWorker(object):
                     plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                     plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                 self.plasma_in_grads.append(plasma_grad)
+
+            # Make sure to add a control edge from NCCL -> prev TF2Plasma op.
+            # This edge ensures that the previous TF2Plasma will be scheduled
+            # before the next NCCL allreduce.
+            for i, device_grads in enumerate(self.per_device_grads):
+                for j, grad in enumerate(device_grads):
+                    if j > 0:
+                        prev_plasma_op = self.plasma_in_grads[j-1]
+                        with tf.control_dependencies([prev_plasma_op]):
+                            self.per_device_grads[i][j] = tf.identity(grad)
 
             # For applying grads <- plasma
             unpacked_gv = []
@@ -182,6 +186,12 @@ class SGDWorker(object):
 
             if max_bytes:
                 unpacked_gv = allreduce.unpack_small_tensors(unpacked_gv, packing_vals)
+
+        # Ops for reading grads with the right control deps
+        nccl_noops = []
+        for j in range(num_grads):
+            with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
+                nccl_noops.append(tf.no_op())
 
         elif max_bytes:
             unpacked_gv = allreduce.unpack_small_tensors(self.packed_grads_and_vars, packing_vals)
