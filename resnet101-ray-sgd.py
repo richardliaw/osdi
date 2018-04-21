@@ -140,7 +140,7 @@ class SGDWorker(object):
             memcpy_plasma_module = tf.load_op_library("/home/ubuntu/osdi2018/ops/memcpy_plasma_op.so")
 
             # For fetching grads -> plasma
-            self.plasma_in_grads = []
+            self.plasma_in_grads = [None] * num_grads
             self.plasma_in_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
 
@@ -174,7 +174,10 @@ class SGDWorker(object):
                             self.plasma_in_grads_oids[j],
                             plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                             plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                        self.plasma_in_grads.append(plasma_grad)
+                        self.plasma_in_grads[j] = plasma_grad
+
+            for g in self.plasma_in_grads:
+                assert g is not None
 
             # For applying grads <- plasma
             unpacked_gv = []
