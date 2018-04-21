@@ -187,16 +187,16 @@ class SGDWorker(object):
             if max_bytes:
                 unpacked_gv = allreduce.unpack_small_tensors(unpacked_gv, packing_vals)
 
+        elif max_bytes:
+            unpacked_gv = allreduce.unpack_small_tensors(self.packed_grads_and_vars, packing_vals)
+        else:
+            unpacked_gv = self.packed_grads_and_vars
+
         # Ops for reading grads with the right control deps
         nccl_noops = []
         for j in range(num_grads):
             with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
                 nccl_noops.append(tf.no_op())
-
-        elif max_bytes:
-            unpacked_gv = allreduce.unpack_small_tensors(self.packed_grads_and_vars, packing_vals)
-        else:
-            unpacked_gv = self.packed_grads_and_vars
 
         # Same shape as packed_grads_and_vars
         assert len(unpacked_gv) == num_devices
