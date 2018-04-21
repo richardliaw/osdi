@@ -152,7 +152,11 @@ class SGDWorker(object):
             self.plasma_in_grads = []
             self.plasma_in_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
-            for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
+            ix = 0
+            for j in range(num_grads):
+                grad = self.per_device_grads[ix][j]
+                ix += 1
+                ix %= num_devices  # round robin assignment
                 plasma_grad = memcpy_plasma_module.tensor_to_plasma(
                     [grad],
                     self.plasma_in_grads_oids[j],
