@@ -156,13 +156,13 @@ class SGDWorker(object):
                     # Make sure to add a control edge from NCCL -> prev TF2Plasma op.
                     # This edge ensures that the previous TF2Plasma will be scheduled
                     # before the next NCCL allreduce.
-                    if j > 0:
-                        prev_plasma_op = self.plasma_in_grads[j-1]
-                        with tf.control_dependencies([prev_plasma_op]):
-                            grad = tf.identity(grad)
-                            self.per_device_grads[i][j] = grad
-                            self.packed_grads_and_vars[i][j] = (
-                                grad, self.packed_grads_and_vars[i][j][1])
+#                    if j > 0:
+#                        prev_plasma_op = self.plasma_in_grads[j-1]
+#                        with tf.control_dependencies([prev_plasma_op]):
+#                            grad = tf.identity(grad)
+#                            self.per_device_grads[i][j] = grad
+#                            self.packed_grads_and_vars[i][j] = (
+#                                grad, self.packed_grads_and_vars[i][j][1])
                     # Send the first GPU's grad to Plasma
                     if i == 0:
                         plasma_grad = memcpy_plasma_module.tensor_to_plasma(
