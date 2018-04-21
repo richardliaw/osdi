@@ -143,24 +143,34 @@ class SGDWorker(object):
             self.plasma_in_grads = []
             self.plasma_in_grads_oids = [
                 tf.placeholder(shape=[], dtype=tf.string) for _ in range(num_grads)]
-            for j, grad in enumerate(self.per_device_grads[0]):  # from 0th device
-                plasma_grad = memcpy_plasma_module.tensor_to_plasma(
-                    [grad],
-                    self.plasma_in_grads_oids[j],
-                    plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
-                    plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                self.plasma_in_grads.append(plasma_grad)
 
-            # Make sure to add a control edge from NCCL -> prev TF2Plasma op.
-            # This edge ensures that the previous TF2Plasma will be scheduled
-            # before the next NCCL allreduce.
+            # Make the lists mutable
             for i, device_grads in enumerate(self.per_device_grads):
                 self.per_device_grads[i] = list(device_grads)
-                for j, grad in enumerate(device_grads):
+                self.packed_grads_and_vars[i] = list(self.packed_grads_and_vars[i])
+
+            # Build the plasma grad outputs from the NCCL ops
+            for j in range(num_grads):
+                for i, device_grads in enumerate(self.per_device_grads):
+                    grad = device_grads[j]
+                    # Make sure to add a control edge from NCCL -> prev TF2Plasma op.
+                    # This edge ensures that the previous TF2Plasma will be scheduled
+                    # before the next NCCL allreduce.
                     if j > 0:
                         prev_plasma_op = self.plasma_in_grads[j-1]
                         with tf.control_dependencies([prev_plasma_op]):
-                            self.per_device_grads[i][j] = tf.identity(grad)
+                            grad = tf.identity(grad)
+                            self.per_device_grads[i][j] = grad
+                            self.packed_grads_and_vars[i][j] = (
+                                grad, self.packed_grads_and_vars[i][j][1])
+                    # Send the first GPU's grad to Plasma
+                    if i == 0:
+                        plasma_grad = memcpy_plasma_module.tensor_to_plasma(
+                            [grad],
+                            self.plasma_in_grads_oids[j],
+                            plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
+                            plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
+                        self.plasma_in_grads.append(plasma_grad)
 
             # For applying grads <- plasma
             unpacked_gv = []
@@ -172,12 +182,12 @@ class SGDWorker(object):
                     self.plasma_out_grads_oids[j],
                     plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                     plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
-                grad_ph = tf.reshape(grad_ph, self.packed_grads_and_vars[0][j][0].shape)
+                grad_ph = tf.reshape(grad_ph, self.per_device_grads[0][j].shape)
                 print("Packed tensor", grad_ph)
                 packed_plasma_grads.append(grad_ph)
             for i in range(num_devices):
                 per_device = []
-                for j, (g, v) in enumerate(self.packed_grads_and_vars[i]):
+                for j, (_, v) in enumerate(self.packed_grads_and_vars[i]):
                     grad_ph = packed_plasma_grads[j]
                     per_device.append((grad_ph, v))
                 unpacked_gv.append(per_device)
