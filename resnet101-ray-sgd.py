@@ -223,6 +223,7 @@ class SGDWorker(object):
         init_op = tf.group(tf.global_variables_initializer(),
                            tf.local_variables_initializer())
         self.sess.run(init_op)
+        self.file_writer = tf.summary.FileWriter("/tmp/tf", self.sess.graph)
 
     def compute_apply(self, args):
         run_timeline(
