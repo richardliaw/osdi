@@ -139,6 +139,9 @@ class SGDWorker(object):
 
         # Ops for reading grads with the right control deps
         nccl_noops = []
+        for j in range(num_grads)[::-1]:
+            with tf.control_dependencies(nccl_noops + [dev_grad[j] for dev_grad in self.per_device_grads]):
+                nccl_noops = [tf.no_op()]
 
         # You must fetch this otherwise the NCCL allreduce will hang
         self.nccl_control_out = tf.group(*nccl_noops)
@@ -252,7 +255,7 @@ class SGDWorker(object):
             for (ph, oid) in zip(self.plasma_out_grads_oids, plasma_oids)
         })
         run_timeline(
-            self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
+            self.sess, [self.plasma_in_grads, self.apply_op],
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="compute_apply_plasma")
 
@@ -268,7 +271,7 @@ class SGDWorker(object):
         fetch(agg_grad_shard_oids)
         self.iter += 1
         run_timeline(
-            self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
+            self.sess, [self.plasma_in_grads, self.apply_op],
             feed_dict=feed_dict,
             write_timeline=args.timeline or self.iter == 2, name="ps_compute_apply")
 
@@ -276,7 +279,7 @@ class SGDWorker(object):
         plasma_in_grads_oids = [
             np.random.bytes(20) for _ in self.plasma_in_grads_oids]
         start = time.time()
-        run_timeline(self.sess, self.plasma_in_grads + [self.nccl_control_out], feed_dict={
+        run_timeline(self.sess, self.plasma_in_grads, feed_dict={
             ph: oid for (ph, oid) in zip(self.plasma_in_grads_oids, plasma_in_grads_oids)
         }, write_timeline=args.timeline, name="grads_plasma_direct")
         if args.verbose:
