@@ -163,7 +163,7 @@ class SGDWorker(object):
                     if j > 0:
                         prev_plasma_op = self.plasma_in_grads[j-1]
                         with tf.control_dependencies([prev_plasma_op] + prev_nccl_ops):
-                            grad = tf.identity(grad)
+                            grad = tf.identity(grad, name="wrapped_allreduce_{}".format(j))
                             self.per_device_grads[i][j] = grad
                             self.packed_grads_and_vars[i][j] = (
                                 grad, self.packed_grads_and_vars[i][j][1])
@@ -281,7 +281,7 @@ class SGDWorker(object):
         })
         fetch(agg_grad_shard_oids)
         run_timeline(
-            self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
+            self.sess, [self.plasma_in_grads, self.apply_op],
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="ps_compute_apply")
 
