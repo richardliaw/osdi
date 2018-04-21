@@ -150,18 +150,18 @@ class SGDWorker(object):
                 self.packed_grads_and_vars[i] = list(self.packed_grads_and_vars[i])
 
             # Build the plasma grad outputs from the NCCL ops
-            for j in range(num_grads):
+            for j in range(num_grads)[::-1]:
                 prev_nccl_ops = []
-                if j > 0:
+                if j < num_grads - 1:
                     for i, device_grads in enumerate(self.per_device_grads):
-                        prev_nccl_ops.append(device_grads[j-1])
+                        prev_nccl_ops.append(device_grads[j+1])
                 for i, device_grads in enumerate(self.per_device_grads):
                     grad = device_grads[j]
                     # Make sure to add a control edge from NCCL -> prev TF2Plasma op.
                     # This edge ensures that the previous TF2Plasma will be scheduled
                     # before the next NCCL allreduce.
-                    if j > 0:
-                        prev_plasma_op = self.plasma_in_grads[j-1]
+                    if j < num_grads - 1:
+                        prev_plasma_op = self.plasma_in_grads[j+1]
                         with tf.control_dependencies([prev_plasma_op] + prev_nccl_ops):
                             grad = tf.identity(grad, name="wrapped_allreduce_{}".format(j))
                             self.per_device_grads[i][j] = grad
@@ -206,8 +206,7 @@ class SGDWorker(object):
 
         # Ops for reading grads with the right control deps
         nccl_noops = []
-        j = num_grads - 1
-        with tf.control_dependencies([dev_grad[j] for dev_grad in self.per_device_grads]):
+        with tf.control_dependencies([dev_grad[0] for dev_grad in self.per_device_grads]):
             nccl_noops.append(tf.no_op())
 
         # You must fetch this otherwise the NCCL allreduce will hang
@@ -281,7 +280,7 @@ class SGDWorker(object):
         })
         fetch(agg_grad_shard_oids)
         run_timeline(
-            self.sess, [self.plasma_in_grads, self.apply_op],
+            self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="ps_compute_apply")
 
