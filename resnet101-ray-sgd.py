@@ -320,7 +320,7 @@ class ParameterServer(object):
 
     def get(self, object_id):
         client = ray.worker.global_worker.plasma_client
-        assert self.acc_counter == self.num_sgd_workers
+        assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
         buff = client.create(
             oid, self.accumulated.nbytes)
