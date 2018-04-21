@@ -155,6 +155,7 @@ class SGDWorker(object):
             # This edge ensures that the previous TF2Plasma will be scheduled
             # before the next NCCL allreduce.
             for i, device_grads in enumerate(self.per_device_grads):
+                self.per_device_grads[i] = list(device_grads)
                 for j, grad in enumerate(device_grads):
                     if j > 0:
                         prev_plasma_op = self.plasma_in_grads[j-1]
