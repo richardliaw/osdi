@@ -422,6 +422,7 @@ def distributed_sgd_step(actors, ps_list, args):
         to_fetch = []
         for grad_shard_oids in grad_shard_oids_list:
             to_fetch.append(grad_shard_oids[j])
+        to_fetch.reverse()  # last layers first
         ps.prefetch.remote(to_fetch)
 
     # Aggregate the gradients produced by the actors. These operations
