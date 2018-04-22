@@ -302,16 +302,23 @@ class SGDWorker(object):
 
 
 class Timeline(object):
-    def __init__(self):
+    def __init__(self, name):
         self.events = []
         self.start = time.time()
+        self.name = name
 
     def reset(self):
         self.events = []
         self.start = time.time()
 
     def add_event(self, name):
-        self.events.append((name, time.time()))
+        self.events.append((self.name + " " + name, time.time()))
+
+    def merge(self, other):
+        if other.start < self.start:
+            self.start = other.start
+            self.events.extend(other.events)
+            self.events.sort(key=lambda e: e[1])
 
     def __str__(self):
         out = "timeline: \n"
@@ -322,11 +329,11 @@ class Timeline(object):
 
 
 class ParameterServer(object):
-    def __init__(self, shard_shape, num_workers):
+    def __init__(self, shard_shape, num_workers, name):
         self.num_sgd_workers = num_workers
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
-        self.timeline = Timeline()
+        self.timeline = Timeline(name)
 
     def prefetch(self, oids):
         self.timeline.reset()
@@ -360,9 +367,8 @@ class ParameterServer(object):
         self.acc_counter = 0
         self.timeline.add_event("get_done")
 
-    def timeline_string(self):
-        self.timeline.add_event("get_timeline")
-        return str(self.timeline)
+    def get_timeline(self):
+        return self.timeline
 
     def ip(self):
         return ray.services.get_node_ip_address()
@@ -450,12 +456,16 @@ def distributed_sgd_step(actors, ps_list, args):
             ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
 
-    tl = ps_list[0].timeline_string.remote()
+    timelines = [ps.get_timeline.remote() for ps in ps_list]
 
     # Wait for the round to finish (optional)
     ray.get(runs)
     if args.verbose:
-        print(ray.get(tl))
+        timelines = ray.get(timelines)
+        t0 = timelines[0]
+        for t in timelines[1:]:
+            t0.merge(t)
+        print(t0)
 
 
 import argparse
@@ -549,7 +559,9 @@ if __name__ == "__main__":
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
         RemotePS = ray.remote(ParameterServer)
-        ps_list = [RemotePS.remote(shape, len(actors)) for shape in shard_shapes]
+        ps_list = [
+            RemotePS.remote(shape, len(actors), "shard_{}".format(i))
+            for (i, shape) in enumerate(shard_shapes)]
         print("All actors started")
         for i in range(10):
             start = time.time()
