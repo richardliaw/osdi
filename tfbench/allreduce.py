@@ -217,12 +217,9 @@ def split_grads_by_size(threshold_size, device_grads):
 
 
 def build_reduce_sum(scaled_grads):
-    out = []
-    for grads in scaled_grads:
-        stacked = tf.concat(axis=0, values=grads)
-        reduced = tf.reduce_sum(stacked, 0)
-        out.append([reduced] * len(grads))
-    return out
+    stacked = tf.concat(axis=0, values=scaled_grads)
+    reduced = tf.reduce_sum(stacked, 0)
+    return [reduced] * len(scaled_grads)
 
 
 def sum_grad_and_var_all_reduce(grad_and_vars,
