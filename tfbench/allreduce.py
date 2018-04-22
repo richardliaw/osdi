@@ -216,6 +216,14 @@ def split_grads_by_size(threshold_size, device_grads):
   return small_grads, large_grads
 
 
+def build_reduce_sum(scaled_grads):
+    out = []
+    for grads in scaled_grads:
+        stacked = tf.concat(axis=0, values=grads)
+        out.append(tf.reduce_sum(stacked, 0))
+    return out
+
+
 def sum_grad_and_var_all_reduce(grad_and_vars,
                                 num_workers,
                                 alg,
@@ -229,6 +237,8 @@ def sum_grad_and_var_all_reduce(grad_and_vars,
     scaled_grads = [g for g, _ in grad_and_vars]
     if alg == 'nccl':
       summed_grads = nccl.all_sum(scaled_grads)
+    elif alg == 'simple':
+      summed_grads = build_reduce_sum(scaled_grads)
     elif alg == 'xring':
       summed_grads = all_reduce.build_ring_all_reduce(
           scaled_grads, num_workers, num_shards, gpu_indices, tf.add)
