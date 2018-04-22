@@ -10,6 +10,7 @@ import tensorflow.contrib.slim as slim
 import tensorflow.contrib.nccl as nccl
 from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
+from chrome_timeline import Timeline
 import os
 import ray
 import time
@@ -301,60 +302,36 @@ class SGDWorker(object):
         return [g.shape for g, _ in main_gv]
 
 
-class Timeline(object):
-    def __init__(self, name):
-        self.events = []
-        self.start = time.time()
-        self.name = name
-
-    def reset(self):
-        self.events = []
-        self.start = time.time()
-
-    def add_event(self, name):
-        self.events.append((self.name + " " + name, time.time()))
-
-    def merge(self, other):
-        if other.start < self.start:
-            self.start = other.start
-        self.events.extend(other.events)
-        self.events.sort(key=lambda e: e[1])
-
-    def __str__(self):
-        out = "timeline: \n"
-        for name, t in self.events:
-            line = ("%.03f" % (t - self.start)).rjust(8, " ")
-            out += line + " " + name + "\n"
-        return out
-
-
 class ParameterServer(object):
-    def __init__(self, shard_shape, num_workers, name):
+    def __init__(self, shard_shape, num_workers, tid):
         self.num_sgd_workers = num_workers
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
-        self.timeline = Timeline(name)
+        self.timeline = Timeline(tid)
 
     def prefetch(self, oids):
         self.timeline.reset()
+        self.timeline.start("prefetch")
         fetch(oids)
-        self.timeline.add_event("prefetch_done")
+        self.timeline.end("prefetch")
 
     def add(self, grad_shard_id):
-        self.timeline.add_event("add_start")
+        self.timeline.start("add")
+        self.timeline.start("add_wait")
         fetch([grad_shard_id])
         ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
-        self.timeline.add_event("add_wait_done")
+        self.timeline.end("add_wait")
+        self.timeline.start("get_buffers")
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
-        self.timeline.add_event("add_get_buffers_done")
+        self.timeline.end("get_buffers")
         self.accumulated += grads
         self.acc_counter += 1
-        self.timeline.add_event("add_done")
+        self.timeline.end("add")
 
     def get(self, object_id):
-        self.timeline.add_event("get_start")
+        self.timeline.start("get")
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
@@ -365,7 +342,7 @@ class ParameterServer(object):
         client.seal(oid)
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
-        self.timeline.add_event("get_done")
+        self.timeline.end("get")
 
     def get_timeline(self):
         return self.timeline
@@ -465,7 +442,7 @@ def distributed_sgd_step(actors, ps_list, args):
         t0 = timelines[0]
         for t in timelines[1:]:
             t0.merge(t)
-        print(t0)
+        t0.chrome_trace_format("ps_timeline.json")
 
 
 import argparse
@@ -560,7 +537,7 @@ if __name__ == "__main__":
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
-            RemotePS.remote(shape, len(actors), "shard_{}".format(i))
+            RemotePS.remote(shape, len(actors), i)
             for (i, shape) in enumerate(shard_shapes)]
         print("All actors started")
         for i in range(10):
