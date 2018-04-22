@@ -316,8 +316,8 @@ class Timeline(object):
     def __str__(self):
         out = "timeline: \n"
         for name, t in self.events:
-            line = ("%.03f" % (t - self.start)).zfill(6)
-            out += line + "\n"
+            line = ("%.03f" % (t - self.start)).rjust(8, " ")
+            out += line + " " + name + "\n"
         return out
 
 
@@ -336,6 +336,8 @@ class ParameterServer(object):
     def add(self, grad_shard_id):
         self.timeline.add_event("add_start")
         fetch([grad_shard_id])
+        ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
+        self.timeline.add_event("add_wait_done")
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
