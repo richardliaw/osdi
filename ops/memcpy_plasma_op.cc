@@ -142,7 +142,7 @@ public:
 
       // Needed to make sure the input buffers have been computed.
 // NOTE(ekl): this is unnecessary when the op is behind a NCCL allreduce already
-//      CHECK(d2h_stream->ThenWaitFor(orig_stream).ok());
+      CHECK(d2h_stream->ThenWaitFor(orig_stream).ok());
 
       for (int i = 0; i < num_tensors; ++i) {
         const auto &input_tensor = context->input(i);
