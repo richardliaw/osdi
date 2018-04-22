@@ -17,10 +17,9 @@ import time
 
 
 def fetch(oids):
-    plasma_ids = [
-        ray.pyarrow.plasma.ObjectID(o) for o in oids
-    ]
-    ray.worker.global_worker.plasma_client.fetch(plasma_ids)
+    for o in oids:
+        plasma_id = ray.pyarrow.plasma.ObjectID(o)
+        ray.worker.global_worker.plasma_client.fetch([plasma_id])
 
 
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
