@@ -317,8 +317,8 @@ class Timeline(object):
     def merge(self, other):
         if other.start < self.start:
             self.start = other.start
-            self.events.extend(other.events)
-            self.events.sort(key=lambda e: e[1])
+        self.events.extend(other.events)
+        self.events.sort(key=lambda e: e[1])
 
     def __str__(self):
         out = "timeline: \n"
