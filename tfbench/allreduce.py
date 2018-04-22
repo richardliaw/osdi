@@ -297,9 +297,10 @@ def sum_grad_and_var_all_reduce(grad_and_vars,
     elif alg == 'simple':
       summed_grads = build_reduce_sum(scaled_grads)
     elif alg == 'better':
-      import ipdb; ipdb.set_trace()
+      assert aux_devices, "Devices need to be given in this fn to use this alg!"
+      print("Devices for placement: ", aux_devices)
       summed_grads = aggregate_gradients_using_copy_with_device_selection(
-        scaled_grads)
+        scaled_grads, aux_devices)
     elif alg == 'xring':
       summed_grads = all_reduce.build_ring_all_reduce(
           scaled_grads, num_workers, num_shards, gpu_indices, tf.add)
