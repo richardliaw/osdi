@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
@@ -317,7 +318,6 @@ class ParameterServer(object):
     def add(self, grad_shard_id):
         self.timeline.start("add")
         self.timeline.start("add_wait")
-        fetch([grad_shard_id])
         ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
         self.timeline.end("add_wait")
         self.timeline.start("get_buffers")
@@ -418,11 +418,11 @@ def distributed_sgd_step(actors, ps_list, args):
         runs.append(run)
 
     # Issue prefetch ops
-    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids)):
+    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids))[::-1]:
         to_fetch = []
         for grad_shard_oids in grad_shard_oids_list:
             to_fetch.append(grad_shard_oids[j])
-        to_fetch.reverse()  # last layers first
+        random.shuffle(to_fetch)
         ps.prefetch.remote(to_fetch)
 
     # Aggregate the gradients produced by the actors. These operations
