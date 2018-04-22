@@ -220,7 +220,8 @@ def build_reduce_sum(scaled_grads):
     out = []
     for grads in scaled_grads:
         stacked = tf.concat(axis=0, values=grads)
-        out.append(tf.reduce_sum(stacked, 0))
+        reduced = tf.reduce_sum(stacked, 0)
+        out.append([reduced] * len(grads))
     return out
 
 
