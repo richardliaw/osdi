@@ -418,7 +418,7 @@ def distributed_sgd_step(actors, ps_list, args):
         runs.append(run)
 
     # Issue prefetch ops
-    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids))[::-1]:
+    for j, (ps, weight_shard_oid) in list(enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
         to_fetch = []
         for grad_shard_oids in grad_shard_oids_list:
             to_fetch.append(grad_shard_oids[j])
