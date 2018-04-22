@@ -301,24 +301,51 @@ class SGDWorker(object):
         return [g.shape for g, _ in main_gv]
 
 
+class Timeline(object):
+    def __init__(self):
+        self.events = []
+        self.start = time.time()
+
+    def reset(self):
+        self.events = []
+        self.start = time.time()
+
+    def add_event(self, name):
+        self.events.append((name, time.time()))
+
+    def __str__(self):
+        out = "timeline: \n"
+        for name, t in self.events:
+            line = ("%.03f" % (t - self.start)).zfill(6)
+            out += line + "\n"
+        return out
+
+
 class ParameterServer(object):
     def __init__(self, shard_shape, num_workers):
         self.num_sgd_workers = num_workers
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
+        self.timeline = Timeline()
 
     def prefetch(self, oids):
+        self.timeline.reset()
         fetch(oids)
+        self.timeline.add_event("prefetch_done")
 
     def add(self, grad_shard_id):
+        self.timeline.add_event("add_start")
         fetch([grad_shard_id])
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
+        self.timeline.add_event("add_get_buffers_done")
         self.accumulated += grads
         self.acc_counter += 1
+        self.timeline.add_event("add_done")
 
     def get(self, object_id):
+        self.timeline.add_event("get_start")
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
@@ -329,6 +356,11 @@ class ParameterServer(object):
         client.seal(oid)
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
+        self.timeline.add_event("get_done")
+
+    def timeline_string(self):
+        self.timeline.add_event("get_timeline")
+        return str(self.timeline)
 
     def ip(self):
         return ray.services.get_node_ip_address()
@@ -416,8 +448,11 @@ def distributed_sgd_step(actors, ps_list, args):
             ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
 
+    tl = ps_list[0].timeline_string.remote()
+
     # Wait for the round to finish (optional)
     ray.get(runs)
+    print(ray.get(tl))
 
 
 import argparse
