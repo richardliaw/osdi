@@ -217,7 +217,7 @@ def split_grads_by_size(threshold_size, device_grads):
 
 
 def build_reduce_sum(scaled_grads):
-    stacked = tf.stack(values=scaled_grads)
+    stacked = tf.parallel_stack(values=scaled_grads)
     reduced = tf.reduce_sum(stacked, 0)
     return [reduced] * len(scaled_grads)
 

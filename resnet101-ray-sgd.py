@@ -454,7 +454,8 @@ def distributed_sgd_step(actors, ps_list, args):
 
     # Wait for the round to finish (optional)
     ray.get(runs)
-    print(ray.get(tl))
+    if args.verbose:
+        print(ray.get(tl))
 
 
 import argparse
