@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import json
 import time
 
@@ -22,7 +26,7 @@ class Timeline(object):
         if other.start_time < self.start_time:
             self.start_time = other.start_time
         self.events.extend(other.events)
-        self.events.sort(key=lambda e: e[1])
+        self.events.sort(key=lambda e: e[3])
 
     def chrome_trace_format(self, filename):
         out = []
