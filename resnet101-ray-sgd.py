@@ -546,7 +546,7 @@ if __name__ == "__main__":
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
 
         if args.inf_network:
-            shard_shapes = [1 for _ in shard_shapes]  # fake 1 byte tensors
+            shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
 
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
