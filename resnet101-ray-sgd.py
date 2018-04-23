@@ -87,6 +87,8 @@ class SGDWorker(object):
                  plasma_op=False,
                  verbose=False):
         # TODO - just port VariableMgrLocalReplicated
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+        print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.i = i
         assert num_devices > 0
         tf_session_args = {
@@ -109,6 +111,7 @@ class SGDWorker(object):
             device = device_tmpl % device_idx
             with tf.device(device):
                 with tf.variable_scope("device_%d" % device_idx):
+                    print("DEVICE: ", device)
                     model = model_cls(batch=batch_size, use_cpus=use_cpus, device=device)
                     models += [model]
                     model.grads = [
@@ -509,7 +512,7 @@ if __name__ == "__main__":
     if args.hugepages:
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/", redis_address=redis_address)
     else:
-        ray.init(redirect_output=False, redis_address=redis_address)
+        ray.init(redirect_output=True, redis_address=redis_address, use_raylet=True)
     if args.warmup:
         warmup()
     model = TFBenchModel
