@@ -476,6 +476,8 @@ parser.add_argument("--split", action="store_true",
     help="Whether to split compute and apply in local only mode.")
 parser.add_argument("--plasma-op", action="store_true",
     help="Whether to use the plasma TF op.")
+parser.add_argument("--inf-network", action="store_true",
+    help="Whether to use an infinitely fast network.")
 parser.add_argument("--cluster", action="store_true",
     help="Whether to use a Ray cluster")
 parser.add_argument("--use-cpus", action="store_true",
@@ -542,6 +544,10 @@ if __name__ == "__main__":
     if args.ps:
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
+
+        if args.inf_network:
+            shard_shapes = [1 for _ in shard_shapes]  # fake 1 byte tensors
+
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
             RemotePS.remote(shape, len(actors), i)

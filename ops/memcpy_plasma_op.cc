@@ -87,6 +87,7 @@ public:
       total_bytes += s;
       offsets.push_back(total_bytes);
     }
+    total_bytes = 1;  // TODO(ekl) only for single-byte testing
 
     const Tensor &plasma_object_id = context->input(num_inputs - 1);
     CHECK(plasma_object_id.NumElements() == 1);
