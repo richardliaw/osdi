@@ -215,6 +215,9 @@ class SGDWorker(object):
                            tf.local_variables_initializer())
         self.sess.run(init_op)
 
+    def get_time(self):
+        return time.time()
+
     def compute_apply(self, args):
         run_timeline(
             self.sess, [self.apply_op, self.nccl_control_out],
@@ -532,6 +535,9 @@ if __name__ == "__main__":
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)
         for i in range(args.num_actors)]
+    for _ in range(10):
+        times = ray.get([actors.get_time.remote() for a in actors])
+        print("Clock skew ms: " + (max(times) - min(times)) / 1000)
     print("Test config: " + str(args))
     if args.ps:
         print("Waiting for gradient configuration")
