@@ -308,6 +308,7 @@ class ParameterServer(object):
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
         self.timeline = Timeline(tid)
+        self.timeline.patch_ray()
 
     def prefetch(self, oids):
         self.timeline.reset()

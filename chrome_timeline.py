@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import ray
 import json
 import time
 
@@ -12,6 +13,20 @@ class Timeline(object):
         self.start_time = time.time()
         self.tid = tid
 
+    def patch_ray(self):
+        orig_log = ray.worker.log
+
+        def custom_log(event_type, kind, *args, **kwargs):
+            orig_log(event_type, kind, *args, **kwargs)
+            if kind == ray.worker.LOG_SPAN_START:
+                self.start(event_type)
+            elif kind == ray.worker.LOG_SPAN_END:
+                self.end(event_type)
+            elif kind == ray.worker.LOG_SPAN_POINT:
+                self.event(event_type)
+
+        ray.worker.log = custom_log
+
     def reset(self):
         self.events = []
         self.start_time = time.time()
@@ -21,6 +36,11 @@ class Timeline(object):
 
     def end(self, name):
         self.events.append((self.tid, "E", name, time.time()))
+
+    def event(self, name):
+        now = time.time()
+        self.events.append((self.tid, "B", name, now))
+        self.events.append((self.tid, "E", name, now + .0001))
 
     def merge(self, other):
         if other.start_time < self.start_time:
