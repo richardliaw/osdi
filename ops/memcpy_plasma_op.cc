@@ -80,11 +80,13 @@ public:
     offsets.reserve(num_tensors + 1);
     offsets.push_back(0);
     size_t total_bytes = 0;
+    size_t real_total = 0;
     for (int i = 0; i < num_tensors; ++i) {
       const size_t s = context->input(i).TotalBytes();
       CHECK(s == context->input(i).NumElements() * sizeof(float));
       CHECK(s > 0);
-      total_bytes += s;
+      real_total += s;
+      total_bytes += 8;  // += s TODO(ekl) only for single-byte testing
       offsets.push_back(total_bytes);
     }
 
@@ -109,6 +111,7 @@ public:
     auto wrapped_callback = [this, context, done, data_buffer, object_id]() {
       {
         mutex_lock lock(mu_);
+        *reinterpret_cast<int64_t *>(data_buffer) = real_total;
         ARROW_CHECK_OK(client_.Seal(object_id));
       }
       context->SetStatus(tensorflow::Status::OK());
@@ -232,7 +235,8 @@ public:
                                  /*timeout_ms=*/-1, &object_buffer));
     }
 
-    const int64_t size_in_bytes = object_buffer.data->size();
+    const int64_t size_in_bytes = *plasma_data =
+        *reinterpret_cast<const int64_t *>(object_buffer.data->data());
     TensorShape shape({size_in_bytes / sizeof(float)});
     // LOG(INFO) << "Output TensorShape: " << shape.DebugString();
     // LOG(INFO) << "size_in_bytes of the plasma object: " << size_in_bytes;
@@ -250,7 +254,7 @@ public:
     if (std::is_same<Device, CPUDevice>::value) {
       std::memcpy(output_tensor->flat<float>().data(),
                   reinterpret_cast<const float *>(object_buffer.data->data()),
-                  size_in_bytes);
+                  4);
       done();
     } else {
       auto orig_stream = context->op_device_context()->stream();
@@ -319,7 +323,7 @@ public:
       const bool success =
           h2d_stream
               ->ThenMemcpy(&wrapped_dst, static_cast<const void *>(plasma_data),
-                           static_cast<uint64>(size_in_bytes))
+                           static_cast<uint64>(4))
               .ok();
       OP_REQUIRES_ASYNC(context, success,
                         errors::Internal("H2D memcpy failed to be enqueued."),
