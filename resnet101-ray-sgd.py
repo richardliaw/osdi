@@ -536,7 +536,7 @@ if __name__ == "__main__":
             verbose=args.verbose)
         for i in range(args.num_actors)]
     for _ in range(10):
-        times = ray.get([actors.get_time.remote() for a in actors])
+        times = ray.get([a.get_time.remote() for a in actors])
     print("Clock skew ms: " + (max(times) - min(times)) / 1000)
     print("Test config: " + str(args))
     if args.ps:
