@@ -84,7 +84,7 @@ public:
       const size_t s = context->input(i).TotalBytes();
       CHECK(s == context->input(i).NumElements() * sizeof(float));
       CHECK(s > 0);
-      total_bytes += 4;  // += s TODO(ekl) only for single-byte testing
+      total_bytes += s;
       offsets.push_back(total_bytes);
     }
 
