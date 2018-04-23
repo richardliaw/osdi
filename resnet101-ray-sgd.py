@@ -4,22 +4,23 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import tensorflow.contrib.nccl as nccl
 from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
+from chrome_timeline import Timeline
 import os
 import ray
 import time
 
 
 def fetch(oids):
-    plasma_ids = [
-        ray.pyarrow.plasma.ObjectID(o) for o in oids
-    ]
-    ray.worker.global_worker.plasma_client.fetch(plasma_ids)
+    for o in oids:
+        plasma_id = ray.pyarrow.plasma.ObjectID(o)
+        ray.worker.global_worker.plasma_client.fetch([plasma_id])
 
 
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
@@ -302,23 +303,34 @@ class SGDWorker(object):
 
 
 class ParameterServer(object):
-    def __init__(self, shard_shape, num_workers):
+    def __init__(self, shard_shape, num_workers, tid):
         self.num_sgd_workers = num_workers
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
+        self.timeline = Timeline(tid)
 
     def prefetch(self, oids):
+        self.timeline.reset()
+        self.timeline.start("prefetch")
         fetch(oids)
+        self.timeline.end("prefetch")
 
     def add(self, grad_shard_id):
-        fetch([grad_shard_id])
+        self.timeline.start("add")
+        self.timeline.start("add_wait")
+        ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
+        self.timeline.end("add_wait")
+        self.timeline.start("get_buffers")
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
+        self.timeline.end("get_buffers")
         self.accumulated += grads
         self.acc_counter += 1
+        self.timeline.end("add")
 
     def get(self, object_id):
+        self.timeline.start("get")
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
@@ -329,6 +341,10 @@ class ParameterServer(object):
         client.seal(oid)
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
+        self.timeline.end("get")
+
+    def get_timeline(self):
+        return self.timeline
 
     def ip(self):
         return ray.services.get_node_ip_address()
@@ -402,10 +418,11 @@ def distributed_sgd_step(actors, ps_list, args):
         runs.append(run)
 
     # Issue prefetch ops
-    for j, (ps, weight_shard_oid) in enumerate(zip(ps_list, accum_shard_ids)):
+    for j, (ps, weight_shard_oid) in list(enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
         to_fetch = []
         for grad_shard_oids in grad_shard_oids_list:
             to_fetch.append(grad_shard_oids[j])
+        random.shuffle(to_fetch)
         ps.prefetch.remote(to_fetch)
 
     # Aggregate the gradients produced by the actors. These operations
@@ -416,8 +433,16 @@ def distributed_sgd_step(actors, ps_list, args):
             ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
 
+    timelines = [ps.get_timeline.remote() for ps in ps_list]
+
     # Wait for the round to finish (optional)
     ray.get(runs)
+    if args.verbose:
+        timelines = ray.get(timelines)
+        t0 = timelines[0]
+        for t in timelines[1:]:
+            t0.merge(t)
+        t0.chrome_trace_format("ps_timeline.json")
 
 
 import argparse
@@ -511,7 +536,9 @@ if __name__ == "__main__":
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
         RemotePS = ray.remote(ParameterServer)
-        ps_list = [RemotePS.remote(shape, len(actors)) for shape in shard_shapes]
+        ps_list = [
+            RemotePS.remote(shape, len(actors), i)
+            for (i, shape) in enumerate(shard_shapes)]
         print("All actors started")
         for i in range(10):
             start = time.time()
