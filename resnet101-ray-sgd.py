@@ -20,7 +20,9 @@ import time
 def fetch(oids):
     for o in oids:
         plasma_id = ray.pyarrow.plasma.ObjectID(o)
+        print("starting fetch")
         ray.worker.global_worker.plasma_client.fetch([plasma_id])
+        print("finished fetch")
 
 
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
@@ -320,9 +322,9 @@ class ParameterServer(object):
 
     def add(self, grad_shard_id):
         self.timeline.start("add")
-        self.timeline.start("add_wait")
-        ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
-        self.timeline.end("add_wait")
+        # self.timeline.start("add_wait")
+        # ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
+        # self.timeline.end("add_wait")
         self.timeline.start("get_buffers")
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
@@ -413,6 +415,7 @@ def distributed_sgd_step(actors, ps_list, args):
 
     # Preallocate object ids that param servers will write new weights to
     accum_shard_ids = [np.random.bytes(20) for _ in ps_list]
+    import ipdb; ipdb.set_trace(context=7)
 
     # Kick off the fused compute grad / update weights tf run for each actor
     runs = []
@@ -538,6 +541,9 @@ if __name__ == "__main__":
     if args.ps:
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
+        print("making sure actors start...")
+        ray.get([a.shard_shapes.remote() for a in actors])
+        print("all actors started")
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
             RemotePS.remote(shape, len(actors), i)
