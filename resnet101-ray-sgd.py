@@ -306,13 +306,14 @@ class SGDWorker(object):
 
 
 class ParameterServer(object):
-    def __init__(self, shard_shape, num_workers, tid):
+    def __init__(self, shard_shape, num_workers, tid, gbps):
         self.num_sgd_workers = num_workers
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
         self.timeline = Timeline(tid)
         self.timeline.patch_ray()
         self.dummy = np.ones(2700000, dtype=np.float32)
+        self.gbps = gbps
 
     def prefetch(self, oids):
         self.timeline.reset()
@@ -326,6 +327,7 @@ class ParameterServer(object):
         ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
         self.timeline.end("add_wait")
         self.timeline.start("get_buffers")
+        time.sleep(10e6 / (self.gbps * 1e9 / 8))
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
@@ -344,6 +346,7 @@ class ParameterServer(object):
             oid, self.accumulated.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
         np.copyto(wrapper, self.accumulated)
+        time.sleep(10e6 / (self.gbps * 1e9 / 8))
         client.seal(oid)
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
@@ -488,6 +491,8 @@ parser.add_argument("--max-bytes", type=int, default=0,
     help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
+parser.add_argument("--gbps", type=int, default=9999,
+    help="Emulate this network speed for downloading gradients.")
 parser.add_argument("--allreduce-spec", type=str, default="",
     help="Allreduce spec")
 
@@ -552,7 +557,7 @@ if __name__ == "__main__":
 
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
-            RemotePS.remote(shape, len(actors), i)
+            RemotePS.remote(shape, len(actors), i, args.gbps)
             for (i, shape) in enumerate(shard_shapes)]
         print("All actors started")
         for i in range(10):
