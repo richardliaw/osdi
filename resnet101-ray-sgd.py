@@ -312,6 +312,7 @@ class ParameterServer(object):
         self.acc_counter = 0
         self.timeline = Timeline(tid)
         self.timeline.patch_ray()
+        self.dummy = np.ones(2700000, dtype=np.float32)
 
     def prefetch(self, oids):
         self.timeline.reset()
@@ -330,6 +331,7 @@ class ParameterServer(object):
         grads = np.frombuffer(raw_grads, dtype=np.float32)
         self.timeline.end("get_buffers")
         self.accumulated = grads
+        self.dummy += self.dummy
         self.acc_counter += 1
         self.timeline.end("add")
 
