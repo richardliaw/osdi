@@ -3,6 +3,7 @@
 from resnet101_ray_sgd import ParameterServer
 import random
 import numpy as np
+import time
 
 import ray
 
@@ -11,7 +12,8 @@ class Shipper(object):
     def __init__(self):
         self.accumulated = np.random.rand(2500000).astype(np.float32)
 
-    def ship(self, list_of_oids):
+    def seal(self, list_of_oids):
+        print("starting seal")
         for object_id in list_of_oids:
             client = ray.worker.global_worker.plasma_client
             oid = ray.pyarrow.plasma.ObjectID(object_id)
@@ -19,6 +21,7 @@ class Shipper(object):
             wrapper = np.frombuffer(buff, dtype=np.float32)
             np.copyto(wrapper, self.accumulated)
             client.seal(oid)
+            print("sealed")
         return True
 
 
@@ -32,13 +35,14 @@ def distributed_sgd_step(actors, ps_list, args):
     print("generated accum oids")
 
     seals = []
+    print("starting seal")
     for a, grad_shard_list in zip(actors, grad_shard_oids_list):
-        seals += [a.ship.remote(grad_shard_list)]
+        seals += [a.seal.remote(grad_shard_list)]
 
     ray.get(seals)
     print("Done sealing")
 
-    # Issue prefetch ops
+    print("Issue prefetch ops")
     for j, (ps, weight_shard_oid) in list(
             enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
         to_fetch = []
@@ -65,7 +69,7 @@ def distributed_sgd_step(actors, ps_list, args):
         t0 = timelines[0]
         for t in timelines[1:]:
             t0.merge(t)
-        t0.chrome_trace_format("ps_timeline.json")
+        t0.chrome_trace_format("psbench_timeline.json")
 
 
 if __name__ == "__main__":
@@ -103,6 +107,15 @@ if __name__ == "__main__":
     requests = {"num_gpus": args.devices_per_actor}
     RemoteShippers = ray.remote(**requests)(Shipper)
     RemotePS = ray.remote(ParameterServer)
-    actors = [RemoteShippers.remote() for i in range(args.num_actors)]
+    actors = []
+    for i in range(args.num_actors):
+        actors += [RemoteShippers.remote()]
+        time.sleep(1)
     ps_list = [RemotePS.remote(2500000, args.num_actors, i) for i in range(15)]
-    distributed_sgd_step(actors, ps_list, args)
+    from collections import Counter
+    print(Counter(ray.get([ps.ip.remote() for ps in ps_list])))
+    for i in range(10):
+        start = time.time()
+        distributed_sgd_step(actors, ps_list, args)
+        print("Took %f sec" % (time.time() - start))
+
