@@ -343,11 +343,19 @@ class ParameterServer(object):
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
+        self.timeline.start("get:create")
         buff = client.create(
             oid, self.accumulated.nbytes)
+        self.timeline.end("get:create")
+        self.timeline.start("get:frombuffer")
         wrapper = np.frombuffer(buff, dtype=np.float32)
+        self.timeline.end("get:frombuffer")
+        self.timeline.start("get:copy")
         np.copyto(wrapper, self.accumulated)
+        self.timeline.end("get:copy")
+        self.timeline.start("get:seal")
         client.seal(oid)
+        self.timeline.end("get:seal")
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
         self.timeline.end("get")
