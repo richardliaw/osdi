@@ -412,16 +412,18 @@ def distributed_sgd_step(actors, ps_list, args):
         [np.random.bytes(20) for _ in ps_list]
         for _ in actors
     ]
+    print("generated grad oids")
 
     # Preallocate object ids that param servers will write new weights to
     accum_shard_ids = [np.random.bytes(20) for _ in ps_list]
-    import ipdb; ipdb.set_trace(context=7)
+    print("generated accum oids")
 
     # Kick off the fused compute grad / update weights tf run for each actor
     runs = []
     for actor, grad_shard_oids in zip(actors, grad_shard_oids_list):
         run = actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
         runs.append(run)
+    print("Launched all ps_compute_applys on all actors")
 
     # Issue prefetch ops
     for j, (ps, weight_shard_oid) in list(enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
@@ -430,6 +432,7 @@ def distributed_sgd_step(actors, ps_list, args):
             to_fetch.append(grad_shard_oids[j])
         random.shuffle(to_fetch)
         ps.prefetch.remote(to_fetch)
+    print("Launched all prefetch ops")
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
@@ -438,8 +441,10 @@ def distributed_sgd_step(actors, ps_list, args):
         for grad_shard_oids in grad_shard_oids_list:
             ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
+    print("Launched all aggregate ops")
 
     timelines = [ps.get_timeline.remote() for ps in ps_list]
+    print("launched timeline gets")
 
     # Wait for the round to finish (optional)
     ray.get(runs)
