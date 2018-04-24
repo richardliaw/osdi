@@ -497,7 +497,7 @@ parser.add_argument("--max-bytes", type=int, default=0,
     help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
-parser.add_argument("--allreduce-spec", type=str, default="",
+parser.add_argument("--allreduce-spec", type=str, default="simple",
     help="Allreduce spec")
 
 
@@ -538,16 +538,16 @@ if __name__ == "__main__":
     if args.use_cpus:
         spec = "xring"
     else:
-        spec = "nccl"
-    if args.allreduce_spec:
         spec = args.allreduce_spec
-    actors = [
-        RemoteSGDWorker.remote(
+    actors = []
+    for i in range(args.num_actors):
+        actors += [RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
-            verbose=args.verbose)
-        for i in range(args.num_actors)]
+            verbose=args.verbose)]
+        time.sleep(1)
+        
     for _ in range(10):
         times = ray.get([a.get_time.remote() for a in actors])
     print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
