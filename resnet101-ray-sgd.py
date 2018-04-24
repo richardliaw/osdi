@@ -220,6 +220,9 @@ class SGDWorker(object):
                            tf.local_variables_initializer())
         self.sess.run(init_op)
 
+    def get_time(self):
+        return time.time()
+
     def compute_apply(self, args):
         run_timeline(
             self.sess, [self.apply_op, self.nccl_control_out],
@@ -313,6 +316,7 @@ class ParameterServer(object):
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
         self.timeline = Timeline(tid)
+        self.timeline.patch_ray()
 
     def prefetch(self, oids):
         self.timeline.reset()
@@ -483,6 +487,8 @@ parser.add_argument("--split", action="store_true",
     help="Whether to split compute and apply in local only mode.")
 parser.add_argument("--plasma-op", action="store_true",
     help="Whether to use the plasma TF op.")
+parser.add_argument("--inf-network", action="store_true",
+    help="Whether to use an infinitely fast network.")
 parser.add_argument("--cluster", action="store_true",
     help="Whether to use a Ray cluster")
 parser.add_argument("--use-cpus", action="store_true",
@@ -542,6 +548,9 @@ if __name__ == "__main__":
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)
         for i in range(args.num_actors)]
+    for _ in range(10):
+        times = ray.get([a.get_time.remote() for a in actors])
+    print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
     print("Test config: " + str(args))
     if args.ps:
         print("Waiting for gradient configuration")
@@ -549,6 +558,8 @@ if __name__ == "__main__":
         print("making sure actors start...")
         ray.get([a.shard_shapes.remote() for a in actors])
         print("all actors started")
+        if args.inf_network:
+            shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
             RemotePS.remote(shape, len(actors), i)
