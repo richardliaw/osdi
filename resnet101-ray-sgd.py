@@ -273,7 +273,7 @@ class SGDWorker(object):
         run_timeline(
             self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
             feed_dict=feed_dict,
-            write_timeline=args.timeline or self.iter == 2, name="ps_compute_apply")
+            write_timeline=args.timeline or self.iter == 4, name="ps_compute_apply")
 
     def compute_gradients_to_plasma_direct(self, args):
         plasma_in_grads_oids = [
