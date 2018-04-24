@@ -108,10 +108,10 @@ public:
 
     float *data = reinterpret_cast<float *>(data_buffer->mutable_data());
 
-    auto wrapped_callback = [this, context, done, data_buffer, object_id]() {
+    auto wrapped_callback = [this, context, done, real_total, data, data_buffer, object_id]() {
       {
         mutex_lock lock(mu_);
-        *reinterpret_cast<int64_t *>(data_buffer) = real_total;
+        *reinterpret_cast<int64_t *>(data) = real_total;
         ARROW_CHECK_OK(client_.Seal(object_id));
       }
       context->SetStatus(tensorflow::Status::OK());
@@ -235,7 +235,7 @@ public:
                                  /*timeout_ms=*/-1, &object_buffer));
     }
 
-    const int64_t size_in_bytes = *plasma_data =
+    const int64_t size_in_bytes = 
         *reinterpret_cast<const int64_t *>(object_buffer.data->data());
     TensorShape shape({size_in_bytes / sizeof(float)});
     // LOG(INFO) << "Output TensorShape: " << shape.DebugString();

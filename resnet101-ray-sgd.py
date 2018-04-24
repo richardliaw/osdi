@@ -329,7 +329,7 @@ class ParameterServer(object):
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
         grads = np.frombuffer(raw_grads, dtype=np.float32)
         self.timeline.end("get_buffers")
-        self.accumulated += grads
+        self.accumulated = grads
         self.acc_counter += 1
         self.timeline.end("add")
 
@@ -546,7 +546,7 @@ if __name__ == "__main__":
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
 
         if args.inf_network:
-            shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
+            shard_shapes = [2 for _ in shard_shapes]  # fake 8 byte tensors
 
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
