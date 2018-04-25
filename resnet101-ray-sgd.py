@@ -311,12 +311,14 @@ class SGDWorker(object):
 
 
 class ParameterServer(object):
-    def __init__(self, shard_shape, num_workers, tid):
+    def __init__(self, num_workers, tid):
         self.num_sgd_workers = num_workers
-        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
         self.timeline = Timeline(tid)
         self.timeline.patch_ray()
+
+    def initialize(self, shard_shape):
+        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
 
     def prefetch(self, oids):
         self.timeline.reset()
@@ -497,7 +499,7 @@ parser.add_argument("--max-bytes", type=int, default=0,
     help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
-parser.add_argument("--allreduce-spec", type=str, default="",
+parser.add_argument("--allreduce-spec", type=str, default="simple",
     help="Allreduce spec")
 
 
@@ -515,6 +517,35 @@ def warmup():
         for _ in range(10):
             ray.put(zeros)
         print("Warming up latency for 100MB put", (time.time() - start) / 10)
+
+
+def roundrobin_ps(ps_cls, num_workers, shard_shapes):
+    min_placed = np.ceil(len(shard_shapes) / num_workers)
+    from collections import Counter, defaultdict
+    tid_counter = [0]
+
+    def create_ps():
+        tid_counter[0] += 1
+        return RemotePS.remote(num_workers, tid_counter[0])
+
+    ip_mapping = defaultdict(list)
+
+    for ps in [create_ps() for s in shard_shapes]:
+        ip_mapping[ray.get(ps.ip.remote())] += [ps]
+
+    while any(len(v) < min_placed for v in ip_mapping.values()):
+        new_ps = create_ps()
+        ip_mapping[ray.get(new_ps.ip.remote())] += [new_ps]
+
+    final_list = []
+    candidates = list(ip_mapping.values())
+    for i, s in enumerate(shard_shapes):
+        ps = candidates[i % num_workers][i // num_workers]
+        final_list += [ps]
+        ps.initialize.remote(s)
+
+    print("Final PS balance: ", Counter(ray.get([ps.ip.remote() for ps in final_list])))
+    return final_list
 
 
 if __name__ == "__main__":
@@ -538,16 +569,16 @@ if __name__ == "__main__":
     if args.use_cpus:
         spec = "xring"
     else:
-        spec = "nccl"
-    if args.allreduce_spec:
         spec = args.allreduce_spec
-    actors = [
-        RemoteSGDWorker.remote(
+
+    for i in range(args.num_actors):
+        actors += [RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
-            verbose=args.verbose)
-        for i in range(args.num_actors)]
+            verbose=args.verbose)]
+        time.sleep(1)
+
     for _ in range(10):
         times = ray.get([a.get_time.remote() for a in actors])
     print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
@@ -561,10 +592,9 @@ if __name__ == "__main__":
         if args.inf_network:
             shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
         RemotePS = ray.remote(ParameterServer)
-        ps_list = [
-            RemotePS.remote(shape, len(actors), i)
-            for (i, shape) in enumerate(shard_shapes)]
-        print("All actors started")
+        ps_list = roundrobin_ps(RemotePS, len(actors), shard_shapes)
+
+        print("All PS started")
         for i in range(10):
             start = time.time()
             print("PS sgd step", i)
