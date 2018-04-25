@@ -324,7 +324,7 @@ class ParameterServer(object):
         plasma_ids = [ray.pyarrow.plasma.ObjectID(x) for x in grad_shard_ids]
         while plasma_ids:
             for p in plasma_ids:
-                if ray.pyarrow.plasma.contains(p):
+                if ray.worker.global_worker.plasma_client.contains(p):
                     self.timeline.start("get_buffers")
                     [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
                     grads = np.frombuffer(raw_grads, dtype=np.float32)
