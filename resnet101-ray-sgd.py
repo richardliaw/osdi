@@ -326,7 +326,7 @@ class ParameterServer(object):
             for p in plasma_ids:
                 if ray.worker.global_worker.plasma_client.contains(p):
                     self.timeline.start("get_buffers")
-                    [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
+                    [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([p])
                     grads = np.frombuffer(raw_grads, dtype=np.float32)
                     self.accumulated += grads
                     self.acc_counter += 1
