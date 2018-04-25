@@ -222,6 +222,65 @@ def build_reduce_sum(scaled_grads):
     return [reduced] * len(scaled_grads)
 
 
+def aggregate_single_gradient_using_copy(grad_and_vars, use_mean,
+                                         check_inf_nan):
+  """Calculate the average gradient for a shared variable across all towers.
+
+  Note that this function provides a synchronization point across all towers.
+
+  Args:
+    grad_and_vars: A list or tuple of (gradient, variable) tuples. Each
+      (gradient, variable) pair within the outer list represents the gradient
+      of the variable calculated for a single tower, and the number of pairs
+      equals the number of towers.
+    use_mean: if True, mean is taken, else sum of gradients is taken.
+    check_inf_nan: check grads for nans and infs.
+
+  Returns:
+    The tuple ([(average_gradient, variable),], has_nan_or_inf) where the
+      gradient has been averaged across all towers. The variable is chosen from
+      the first tower. The has_nan_or_inf indicates the grads has nan or inf.
+  """
+  grads = [g for g, _ in grad_and_vars]
+  grad = tf.add_n(grads)
+
+  if use_mean and len(grads) > 1:
+    grad = tf.multiply(grad, 1.0 / len(grads))
+
+  v = grad_and_vars[0][1]
+  if check_inf_nan:
+    has_nan_or_inf = tf.logical_not(tf.reduce_all(tf.is_finite(grads)))
+    return (grad, v), has_nan_or_inf
+  else:
+    return (grad, v), None
+
+
+def aggregate_gradients_using_copy_with_device_selection(
+    tower_grads, avail_devices, use_mean=True, check_inf_nan=False):
+  """Aggregate gradients, controlling device for the aggregation.
+
+  Args:
+    tower_grads: List of lists of (gradient, variable) tuples. The outer list
+      is over towers. The inner list is over individual gradients.
+    use_mean: if True, mean is taken, else sum of gradients is taken.
+    check_inf_nan: If true, check grads for nans and infs.
+
+  Returns:
+    The tuple ([(average_gradient, variable),], has_nan_or_inf) where the
+      gradient has been averaged across all towers. The variable is chosen from
+      the first tower. The has_nan_or_inf indicates the grads has nan or inf.
+  """
+  agg_grads = []
+  has_nan_or_inf_list = []
+  for i, single_grads in enumerate(zip(*tower_grads)):
+    with tf.device(avail_devices[i % len(avail_devices)]):
+      grad_and_var, has_nan_or_inf = aggregate_single_gradient_using_copy(
+          single_grads, use_mean, check_inf_nan)
+      agg_grads.append(grad_and_var)
+      has_nan_or_inf_list.append(has_nan_or_inf)
+  return agg_grads
+
+
 def sum_grad_and_var_all_reduce(grad_and_vars,
                                 num_workers,
                                 alg,
@@ -237,6 +296,11 @@ def sum_grad_and_var_all_reduce(grad_and_vars,
       summed_grads = nccl.all_sum(scaled_grads)
     elif alg == 'simple':
       summed_grads = build_reduce_sum(scaled_grads)
+    elif alg == 'better':
+      assert aux_devices, "Devices need to be given in this fn to use this alg!"
+      print("Devices for placement: ", aux_devices)
+      summed_grads = aggregate_gradients_using_copy_with_device_selection(
+        scaled_grads, aux_devices)
     elif alg == 'xring':
       summed_grads = all_reduce.build_ring_all_reduce(
           scaled_grads, num_workers, num_shards, gpu_indices, tf.add)
