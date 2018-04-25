@@ -570,7 +570,7 @@ if __name__ == "__main__":
         spec = "xring"
     else:
         spec = args.allreduce_spec
-
+    actors = []
     for i in range(args.num_actors):
         actors += [RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
@@ -593,7 +593,6 @@ if __name__ == "__main__":
             shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
         RemotePS = ray.remote(ParameterServer)
         ps_list = roundrobin_ps(RemotePS, len(actors), shard_shapes)
-
         print("All PS started")
         for i in range(10):
             start = time.time()
