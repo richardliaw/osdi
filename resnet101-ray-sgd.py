@@ -493,6 +493,9 @@ parser.add_argument("--inf-network", action="store_true",
     help="Whether to use an infinitely fast network.")
 parser.add_argument("--cluster", action="store_true",
     help="Whether to use a Ray cluster")
+parser.add_argument("--roundrobin_ps", action="store_true",
+    help="Whether to round robin place PS shards. Requires cluster to be true"
+         "and each node to only hae one actor")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
 parser.add_argument("--max-bytes", type=int, default=0,
@@ -529,10 +532,10 @@ def roundrobin_ps(ps_cls, num_workers, shard_shapes):
         return RemotePS.remote(num_workers, tid_counter[0])
 
     ip_mapping = defaultdict(list)
+    init_list = [create_ps() for s in shard_shapes]
 
-    for ps in [create_ps() for s in shard_shapes]:
+    for ps in init_list:
         ip_mapping[ray.get(ps.ip.remote())] += [ps]
-
     while any(len(v) < min_placed for v in ip_mapping.values()):
         new_ps = create_ps()
         ip_mapping[ray.get(new_ps.ip.remote())] += [new_ps]
@@ -557,7 +560,7 @@ if __name__ == "__main__":
     if args.hugepages:
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/", redis_address=redis_address)
     else:
-        ray.init(redirect_output=True, redis_address=redis_address, use_raylet=True)
+        ray.init(redirect_output=False, redis_address=redis_address, use_raylet=True)
     if args.warmup:
         warmup()
     model = TFBenchModel
@@ -592,7 +595,15 @@ if __name__ == "__main__":
         if args.inf_network:
             shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
         RemotePS = ray.remote(ParameterServer)
-        ps_list = roundrobin_ps(RemotePS, len(actors), shard_shapes)
+        if args.roundrobin_ps:
+            print("## !! Round Robin Assumes Each Node only has 1 SGDWorker !!")
+            assert args.cluster
+            assert len(actors) > 1, "Need more than 1 node for round robin!"
+            ps_list = roundrobin_ps(RemotePS, len(actors), shard_shapes)
+        else:
+            ps_list = [RemotePS.remote(len(actors), i) 
+                       for i, s in enumerate(shard_shapes)]
+            [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
         print("All PS started")
         for i in range(10):
             start = time.time()
