@@ -319,6 +319,23 @@ class ParameterServer(object):
         fetch(oids)
         self.timeline.end("prefetch")
 
+    def add_spinwait(self, grad_shard_ids):
+        self.timeline.start("add_spinwait")
+        plasma_ids = [ray.pyarrow.plasma.ObjectID(x) for x in grad_shard_ids]
+        while plasma_ids:
+            for p in plasma_ids:
+                if ray.pyarrow.plasma.contains(p):
+                    self.timeline.start("get_buffers")
+                    [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
+                    grads = np.frombuffer(raw_grads, dtype=np.float32)
+                    self.accumulated += grads
+                    self.acc_counter += 1
+                    self.timeline.end("get_buffers")
+                    plasma_ids.remove(p)
+                    break
+            time.sleep(.001)
+        self.timeline.end("add_spinwait")
+
     def add(self, grad_shard_id):
         self.timeline.start("add")
         self.timeline.start("add_wait")
@@ -433,8 +450,11 @@ def distributed_sgd_step(actors, ps_list, args):
     # run concurrently with the actor methods above.
     for j, (ps, weight_shard_oid) in list(
             enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
-        for grad_shard_oids in grad_shard_oids_list:
-            ps.add.remote(grad_shard_oids[j])
+        if args.ps_spinwait:
+            ps.add_spinwait.remote([gs[j] for gs in grad_shard_oids_list])
+        else:
+            for grad_shard_oids in grad_shard_oids_list:
+                ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
 
     timelines = [ps.get_timeline.remote() for ps in ps_list]
@@ -476,8 +496,8 @@ parser.add_argument("--split", action="store_true",
     help="Whether to split compute and apply in local only mode.")
 parser.add_argument("--plasma-op", action="store_true",
     help="Whether to use the plasma TF op.")
-parser.add_argument("--inf-network", action="store_true",
-    help="Whether to use an infinitely fast network.")
+parser.add_argument("--ps-spinwait", action="store_true",
+    help="Whether to spin wait for plasma to download objects")
 parser.add_argument("--cluster", action="store_true",
     help="Whether to use a Ray cluster")
 parser.add_argument("--use-cpus", action="store_true",
@@ -486,7 +506,7 @@ parser.add_argument("--max-bytes", type=int, default=0,
     help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
     help="ResNet101 batch size")
-parser.add_argument("--allreduce-spec", type=str, default="",
+parser.add_argument("--allreduce-spec", type=str, default="simple",
     help="Allreduce spec")
 
 
@@ -544,9 +564,6 @@ if __name__ == "__main__":
     if args.ps:
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
-
-        if args.inf_network:
-            shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
 
         RemotePS = ray.remote(ParameterServer)
         ps_list = [
