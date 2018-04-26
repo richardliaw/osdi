@@ -580,7 +580,7 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
         ip_mapping[ray.get(ps.ip.remote())] += [ps]
     while (any(len(v) < min_placed for v in ip_mapping.values())
               or (len(ip_mapping) < num_workers)):
-        print("generating new ps, distinct ips so far", len(ip_mapping))
+        print("generating new ps, ip map so far", ip_mapping)
         new_ps = create_ps()
         ps_ip = ray.get(new_ps.ip.remote())
         if spread_ps and ps_ip in worker_ips:
