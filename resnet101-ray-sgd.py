@@ -617,8 +617,6 @@ if __name__ == "__main__":
         print("making sure actors start...")
         ray.get([a.shard_shapes.remote() for a in actors])
         print("all actors started")
-        if args.inf_network:
-            shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
         RemotePS = ray.remote(ParameterServer)
         if args.roundrobin_ps:
             print("## !! Round Robin Assumes Each Node only has 1 SGDWorker !!")
