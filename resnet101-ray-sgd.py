@@ -535,7 +535,7 @@ if __name__ == "__main__":
     if args.hugepages:
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/", redis_address=redis_address)
     else:
-        ray.init(redirect_output=False, redis_address=redis_address)
+        ray.init(redirect_output=False, redis_address=redis_address, use_raylet=True)
     if args.warmup:
         warmup()
     model = TFBenchModel
