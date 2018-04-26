@@ -595,6 +595,13 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
         final_list += [ps]
         ps.initialize.remote(s)
 
+    for ps in sum(candidates, []):
+        if ps not in final_list:
+            ps.__ray_terminate__.remote(ps._ray_actor_id.id())
+            print("removing a ps...")
+        else:
+            print("saving ps...")
+
     print("Final PS balance: ", Counter(ray.get([ps.ip.remote() for ps in final_list])))
     return final_list
 
