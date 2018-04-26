@@ -20,7 +20,9 @@ import time
 def fetch(oids):
     for o in oids:
         plasma_id = ray.pyarrow.plasma.ObjectID(o)
+        print("starting fetch")
         ray.worker.global_worker.plasma_client.fetch([plasma_id])
+        print("finished fetch")
 
 
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
@@ -84,9 +86,13 @@ class SGDWorker(object):
                  num_devices=1,
                  use_cpus=False,
                  max_bytes=0,
+                 use_xray=True,
                  plasma_op=False,
                  verbose=False):
         # TODO - just port VariableMgrLocalReplicated
+        if use_xray:
+            os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+            print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.i = i
         assert num_devices > 0
         tf_session_args = {
@@ -109,6 +115,7 @@ class SGDWorker(object):
             device = device_tmpl % device_idx
             with tf.device(device):
                 with tf.variable_scope("device_%d" % device_idx):
+                    print("DEVICE: ", device)
                     model = model_cls(batch=batch_size, use_cpus=use_cpus, device=device)
                     models += [model]
                     model.grads = [
@@ -306,12 +313,14 @@ class SGDWorker(object):
 
 
 class ParameterServer(object):
-    def __init__(self, shard_shape, num_workers, tid):
+    def __init__(self, num_workers, tid):
         self.num_sgd_workers = num_workers
-        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
         self.acc_counter = 0
         self.timeline = Timeline(tid)
         self.timeline.patch_ray()
+
+    def initialize(self, shard_shape):
+        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
 
     def prefetch(self, oids):
         self.timeline.reset()
@@ -338,9 +347,9 @@ class ParameterServer(object):
 
     def add(self, grad_shard_id):
         self.timeline.start("add")
-        self.timeline.start("add_wait")
-        ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
-        self.timeline.end("add_wait")
+        # self.timeline.start("add_wait")
+        # ray.wait([ray.local_scheduler.ObjectID(grad_shard_id)])
+        # self.timeline.end("add_wait")
         self.timeline.start("get_buffers")
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
@@ -428,15 +437,18 @@ def distributed_sgd_step(actors, ps_list, args):
         [np.random.bytes(20) for _ in ps_list]
         for _ in actors
     ]
+    print("generated grad oids")
 
     # Preallocate object ids that param servers will write new weights to
     accum_shard_ids = [np.random.bytes(20) for _ in ps_list]
+    print("generated accum oids")
 
     # Kick off the fused compute grad / update weights tf run for each actor
     runs = []
     for actor, grad_shard_oids in zip(actors, grad_shard_oids_list):
         run = actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
         runs.append(run)
+    print("Launched all ps_compute_applys on all actors")
 
     # Issue prefetch ops
     for j, (ps, weight_shard_oid) in list(enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
@@ -445,6 +457,7 @@ def distributed_sgd_step(actors, ps_list, args):
             to_fetch.append(grad_shard_oids[j])
         random.shuffle(to_fetch)
         ps.prefetch.remote(to_fetch)
+    print("Launched all prefetch ops")
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
@@ -456,8 +469,10 @@ def distributed_sgd_step(actors, ps_list, args):
             for grad_shard_oids in grad_shard_oids_list:
                 ps.add.remote(grad_shard_oids[j])
         ps.get.remote(weight_shard_oid)
+    print("Launched all aggregate ops")
 
     timelines = [ps.get_timeline.remote() for ps in ps_list]
+    print("launched timeline gets")
 
     # Wait for the round to finish (optional)
     ray.get(runs)
@@ -500,8 +515,13 @@ parser.add_argument("--ps-spinwait", action="store_true",
     help="Whether to spin wait for plasma to download objects")
 parser.add_argument("--cluster", action="store_true",
     help="Whether to use a Ray cluster")
+parser.add_argument("--roundrobin_ps", action="store_true",
+    help="Whether to round robin place PS shards. Requires cluster to be true"
+         "and each node to only hae one actor")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
+parser.add_argument("--set-visible-devs", action="store_false",
+    help="Whether to set visible devices. Defaults to True; needed for x-ray.")
 parser.add_argument("--max-bytes", type=int, default=0,
     help="Max byte tensor to pack")
 parser.add_argument("--batch-size", type=int, default=64,
@@ -526,6 +546,35 @@ def warmup():
         print("Warming up latency for 100MB put", (time.time() - start) / 10)
 
 
+def roundrobin_ps(ps_cls, num_workers, shard_shapes):
+    min_placed = np.ceil(len(shard_shapes) / num_workers)
+    from collections import Counter, defaultdict
+    tid_counter = [0]
+
+    def create_ps():
+        tid_counter[0] += 1
+        return RemotePS.remote(num_workers, tid_counter[0])
+
+    ip_mapping = defaultdict(list)
+    init_list = [create_ps() for s in shard_shapes]
+
+    for ps in init_list:
+        ip_mapping[ray.get(ps.ip.remote())] += [ps]
+    while any(len(v) < min_placed for v in ip_mapping.values()):
+        new_ps = create_ps()
+        ip_mapping[ray.get(new_ps.ip.remote())] += [new_ps]
+
+    final_list = []
+    candidates = list(ip_mapping.values())
+    for i, s in enumerate(shard_shapes):
+        ps = candidates[i % num_workers][i // num_workers]
+        final_list += [ps]
+        ps.initialize.remote(s)
+
+    print("Final PS balance: ", Counter(ray.get([ps.ip.remote() for ps in final_list])))
+    return final_list
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
     if args.cluster:
@@ -535,7 +584,7 @@ if __name__ == "__main__":
     if args.hugepages:
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/", redis_address=redis_address)
     else:
-        ray.init(redirect_output=False, redis_address=redis_address)
+        ray.init(redirect_output=False, redis_address=redis_address, use_raylet=True)
     if args.warmup:
         warmup()
     model = TFBenchModel
@@ -547,16 +596,16 @@ if __name__ == "__main__":
     if args.use_cpus:
         spec = "xring"
     else:
-        spec = "nccl"
-    if args.allreduce_spec:
         spec = args.allreduce_spec
-    actors = [
-        RemoteSGDWorker.remote(
+    actors = []
+    for i in range(args.num_actors):
+        actors += [RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
-            verbose=args.verbose)
-        for i in range(args.num_actors)]
+            verbose=args.verbose)]
+        time.sleep(1)
+
     for _ in range(10):
         times = ray.get([a.get_time.remote() for a in actors])
     print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
@@ -564,13 +613,23 @@ if __name__ == "__main__":
     if args.ps:
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
-
-        RemotePS = ray.remote(ParameterServer)
-        ps_list = [
-            RemotePS.remote(shape, len(actors), i)
-            for (i, shape) in enumerate(shard_shapes)]
-        print("All actors started")
         results = []
+        print("making sure actors start...")
+        ray.get([a.shard_shapes.remote() for a in actors])
+        print("all actors started")
+        if args.inf_network:
+            shard_shapes = [4 for _ in shard_shapes]  # fake 4 byte tensors
+        RemotePS = ray.remote(ParameterServer)
+        if args.roundrobin_ps:
+            print("## !! Round Robin Assumes Each Node only has 1 SGDWorker !!")
+            assert args.cluster
+            assert len(actors) > 1, "Need more than 1 node for round robin!"
+            ps_list = roundrobin_ps(RemotePS, len(actors), shard_shapes)
+        else:
+            ps_list = [RemotePS.remote(len(actors), i) 
+                       for i, s in enumerate(shard_shapes)]
+            [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
+        print("All PS started")
         for i in range(10):
             start = time.time()
             print("PS sgd step", i)
