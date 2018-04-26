@@ -563,7 +563,9 @@ def roundrobin_ps(ps_cls, num_workers, shard_shapes):
 
     for ps in init_list:
         ip_mapping[ray.get(ps.ip.remote())] += [ps]
-    while any(len(v) < min_placed for v in ip_mapping.values()):
+    while (any(len(v) < min_placed for v in ip_mapping.values())
+              or (len(ip_mapping) < num_workers)):
+        print("generating new ps...")
         new_ps = create_ps()
         ip_mapping[ray.get(new_ps.ip.remote())] += [new_ps]
 
