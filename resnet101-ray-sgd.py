@@ -222,9 +222,6 @@ class SGDWorker(object):
                            tf.local_variables_initializer())
         self.sess.run(init_op)
 
-    def get_time(self):
-        return time.time()
-
     def compute_apply(self, args):
         run_timeline(
             self.sess, [self.apply_op, self.nccl_control_out],
@@ -318,6 +315,12 @@ class ParameterServer(object):
         self.acc_counter = 0
         self.timeline = Timeline(tid)
         self.timeline.patch_ray()
+
+    def get_time(self):
+        return time.time() + self.timeline.offset
+
+    def set_time(self, ref_time):
+        self.timeline.offset = ref_time - time.time()
 
     def initialize(self, shard_shape):
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
@@ -609,9 +612,6 @@ if __name__ == "__main__":
             verbose=args.verbose)]
         time.sleep(1)
 
-    for _ in range(10):
-        times = ray.get([a.get_time.remote() for a in actors])
-    print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
     print("Test config: " + str(args))
     if args.ps:
         print("Waiting for gradient configuration")
@@ -631,6 +631,10 @@ if __name__ == "__main__":
                        for i, s in enumerate(shard_shapes)]
             [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
         print("All PS started")
+        for _ in range(10):
+            [a.set_time.remote(time.time()) for a in ps_list]
+            times = ray.get([a.get_time.remote() for a in ps_list])
+        print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
         if args.warmup:
             ray.get([ps.warmup.remote() for ps in ps_list])
         print("All PS warmed")
