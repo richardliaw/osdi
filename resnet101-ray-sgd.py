@@ -468,10 +468,6 @@ def distributed_sgd_step(actors, ps_list, args):
         ps.prefetch.remote(to_fetch)
     print("Launched all prefetch ops")
 
-    print("Launched all marker ops")
-    ray.get([ps.mark.remote() for ps in ps_list])
-    ray.get([ps.mark.remote() for ps in ps_list])
-
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
     for j, (ps, weight_shard_oid) in list(
@@ -640,14 +636,14 @@ if __name__ == "__main__":
                        for i, s in enumerate(shard_shapes)]
             [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
         print("All PS started")
-        for _ in range(25):
+        for _ in range(10):
             [a.set_time.remote(time.time()) for a in ps_list]
             times = ray.get([a.get_time.remote() for a in ps_list])
         print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
         if args.warmup:
             ray.get([ps.warmup.remote() for ps in ps_list])
         print("All PS warmed")
-        for i in range(10):
+        for i in range(25):
             start = time.time()
             print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
