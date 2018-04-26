@@ -572,12 +572,8 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
         return RemotePS.remote(num_workers, tid_counter[0])
 
     ip_mapping = defaultdict(list)
-    init_list = [create_ps() for s in shard_shapes]
-
     worker_ips = ray.get([w.ip.remote() for w in sgd_workers])
 
-    for ps in init_list:
-        ip_mapping[ray.get(ps.ip.remote())] += [ps]
     while (any(len(v) < min_placed for v in ip_mapping.values())
               or (len(ip_mapping) < num_workers)):
         print("generating new ps, ip map so far", ip_mapping)
