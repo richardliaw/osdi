@@ -10,9 +10,9 @@ import time
 class Timeline(object):
     def __init__(self, tid):
         self.events = []
+        self.offset = 0
         self.start_time = self.time()
         self.tid = tid
-        self.offset = 0
 
     def patch_ray(self):
         orig_log = ray.worker.log
