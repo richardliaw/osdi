@@ -72,14 +72,23 @@ def sum_gradients_all_reduce(dev_prefixes,
 
   else:
     packing = None
-  reduced_gv_list = []
-  for grad_and_vars in zip(*tower_grads):
-    reduced_gv_list.append(
-        sum_grad_and_var_all_reduce(
-            grad_and_vars, num_workers, alg, gpu_indices, aux_devices
-            if is_hierarchical else aux_device_groups[group_index], num_shards))
-    group_index = (group_index + 1) % len(aux_device_groups)
-  new_tower_grads = [list(x) for x in zip(*reduced_gv_list)]
+  new_tower_grads = []
+  if alg == 'better':
+    raw_devices = ['/gpu:%i' % (i) for i in gpu_indices]
+    agg_grads = aggregate_gradients_using_copy_with_device_selection(
+      tower_grads, raw_devices)
+    for arr in tower_grads:
+      new_tower_grads.append(
+          [(g, v) for (_, v), (g, _) in zip(arr, agg_grads)])
+  else:
+    reduced_gv_list = []
+    for grad_and_vars in zip(*tower_grads):
+      reduced_gv_list.append(
+          sum_grad_and_var_all_reduce(
+              grad_and_vars, num_workers, alg, gpu_indices, aux_devices
+              if is_hierarchical else aux_device_groups[group_index], num_shards))
+      group_index = (group_index + 1) % len(aux_device_groups)
+    new_tower_grads = [list(x) for x in zip(*reduced_gv_list)]
   return new_tower_grads, packing
 
 def print_stats(sizes):
