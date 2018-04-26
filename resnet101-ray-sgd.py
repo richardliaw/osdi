@@ -322,6 +322,9 @@ class ParameterServer(object):
     def initialize(self, shard_shape):
         self.accumulated = np.zeros(shard_shape, dtype=np.float32)
 
+    def warmup(self):
+        warmup()
+
     def prefetch(self, oids):
         self.timeline.reset()
         self.timeline.start("prefetch")
@@ -585,7 +588,7 @@ if __name__ == "__main__":
         ray.init(huge_pages=True, plasma_directory="/mnt/hugepages/", redis_address=redis_address)
     else:
         ray.init(redirect_output=False, redis_address=redis_address, use_raylet=True)
-    if args.warmup:
+    if args.warmup and not args.ps:
         warmup()
     model = TFBenchModel
     if args.use_cpus:
@@ -628,6 +631,9 @@ if __name__ == "__main__":
                        for i, s in enumerate(shard_shapes)]
             [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
         print("All PS started")
+        if args.warmup:
+            ray.get([ps.warmup.remote() for ps in ps_list])
+        print("All PS warmed")
         for i in range(10):
             start = time.time()
             print("PS sgd step", i)
