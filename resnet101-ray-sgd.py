@@ -308,6 +308,9 @@ class SGDWorker(object):
         main_gv = self.packed_grads_and_vars[0]
         return [g.shape for g, _ in main_gv]
 
+    def ip(self):
+        return ray.services.get_node_ip_address()
+
 
 class ParameterServer(object):
     def __init__(self, num_workers, tid):
@@ -527,6 +530,8 @@ parser.add_argument("--cluster", action="store_true",
 parser.add_argument("--roundrobin_ps", action="store_true",
     help="Whether to round robin place PS shards. Requires cluster to be true"
          "and each node to only hae one actor")
+parser.add_argument("--spread_ps", action="store_true",
+    help="Whether to force PS to be allocated on nodes other than SGD workers")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
 parser.add_argument("--set-visible-devs", action="store_false",
@@ -555,7 +560,8 @@ def warmup():
         print("Warming up latency for 100MB put", (time.time() - start) / 10)
 
 
-def roundrobin_ps(ps_cls, num_workers, shard_shapes):
+def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
+    num_workers = len(sgd_workers)
     min_placed = np.ceil(len(shard_shapes) / num_workers)
     from collections import Counter, defaultdict
     tid_counter = [0]
@@ -567,13 +573,19 @@ def roundrobin_ps(ps_cls, num_workers, shard_shapes):
     ip_mapping = defaultdict(list)
     init_list = [create_ps() for s in shard_shapes]
 
+    worker_ips = ray.get([w.ip.remote() for w in sgd_workers])
+
     for ps in init_list:
         ip_mapping[ray.get(ps.ip.remote())] += [ps]
     while (any(len(v) < min_placed for v in ip_mapping.values())
               or (len(ip_mapping) < num_workers)):
-        print("generating new ps...")
+        print("generating new ps, distinct ips so far", len(ip_mapping))
         new_ps = create_ps()
-        ip_mapping[ray.get(new_ps.ip.remote())] += [new_ps]
+        ps_ip = ray.get(new_ps.ip.remote())
+        if spread_ps and ps_ip in worker_ips:
+            print("ignoring ps that is on same node as worker")
+        else:
+            ip_mapping[ps_ip] += [new_ps]
 
     final_list = []
     candidates = list(ip_mapping.values())
@@ -630,7 +642,7 @@ if __name__ == "__main__":
             print("## !! Round Robin Assumes Each Node only has 1 SGDWorker !!")
             assert args.cluster
             assert len(actors) > 1, "Need more than 1 node for round robin!"
-            ps_list = roundrobin_ps(RemotePS, len(actors), shard_shapes)
+            ps_list = roundrobin_ps(RemotePS, actors, shard_shapes, args.spread_ps)
         else:
             ps_list = [RemotePS.remote(len(actors), i) 
                        for i, s in enumerate(shard_shapes)]
