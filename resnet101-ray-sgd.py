@@ -562,6 +562,7 @@ def roundrobin_ps(ps_cls, num_workers, shard_shapes):
 
     def create_ps():
         tid_counter[0] += 1
+        time.sleep(1)  # needed because resource tracking is faulty
         return RemotePS.remote(num_workers, tid_counter[0])
 
     ip_mapping = defaultdict(list)
