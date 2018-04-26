@@ -328,6 +328,9 @@ class ParameterServer(object):
     def warmup(self):
         warmup()
 
+    def mark(self):
+        self.timeline.event("mark")
+
     def prefetch(self, oids):
         self.timeline.reset()
         self.timeline.start("prefetch")
@@ -464,6 +467,10 @@ def distributed_sgd_step(actors, ps_list, args):
         random.shuffle(to_fetch)
         ps.prefetch.remote(to_fetch)
     print("Launched all prefetch ops")
+
+    print("Launched all marker ops")
+    ray.get([ps.mark.remote() for ps in ps_list])
+    ray.get([ps.mark.remote() for ps in ps_list])
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
