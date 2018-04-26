@@ -568,6 +568,7 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
 
     def create_ps():
         tid_counter[0] += 1
+        time.sleep(1)  # needed because resource tracking is faulty
         return RemotePS.remote(num_workers, tid_counter[0])
 
     ip_mapping = defaultdict(list)
@@ -627,6 +628,7 @@ if __name__ == "__main__":
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)]
+        print("Creating an actor")
         time.sleep(1)
 
     print("Test config: " + str(args))
