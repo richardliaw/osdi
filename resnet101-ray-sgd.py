@@ -570,11 +570,16 @@ if __name__ == "__main__":
             RemotePS.remote(shape, len(actors), i)
             for (i, shape) in enumerate(shard_shapes)]
         print("All actors started")
+        results = []
         for i in range(10):
             start = time.time()
             print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
-            print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
+            ips = args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start)
+            print("Images per second", ips)
+            if i > 2:
+                results.append(ips)
+        print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
     else:
         assert args.num_actors == 1
         for i in range(10):
