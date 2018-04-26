@@ -616,6 +616,7 @@ if __name__ == "__main__":
             use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)]
+        print("Creating an actor")
         time.sleep(1)
 
     print("Test config: " + str(args))
