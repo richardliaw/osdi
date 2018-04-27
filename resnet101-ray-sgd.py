@@ -660,7 +660,7 @@ if __name__ == "__main__":
         if args.warmup:
             ray.get([ps.warmup.remote() for ps in ps_list])
         print("All PS warmed")
-        for i in range(100):
+        for i in range(20):
             start = time.time()
             print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
