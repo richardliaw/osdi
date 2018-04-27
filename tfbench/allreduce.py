@@ -221,6 +221,8 @@ def build_reduce_sum(scaled_grads):
     reduced = tf.reduce_sum(stacked, 0)
     return [reduced] * len(scaled_grads)
 
+def build_trivial_sum(scaled_grads):
+    return scaled_grads
 
 def aggregate_single_gradient_using_copy(grad_and_vars, use_mean,
                                          check_inf_nan):
@@ -296,6 +298,8 @@ def sum_grad_and_var_all_reduce(grad_and_vars,
       summed_grads = nccl.all_sum(scaled_grads)
     elif alg == 'simple':
       summed_grads = build_reduce_sum(scaled_grads)
+    elif alg == 'trivial':
+      summed_grads = build_trivial_sum(scaled_grads)
     elif alg == 'xring':
       summed_grads = all_reduce.build_ring_all_reduce(
           scaled_grads, num_workers, num_shards, gpu_indices, tf.add)
