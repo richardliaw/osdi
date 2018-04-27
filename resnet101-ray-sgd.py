@@ -700,4 +700,4 @@ if __name__ == "__main__":
             start = time.time()
             print("Local sgd step", i)
             do_sgd_step(actors, args)
-            print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
+            print("Images per second", args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start))
