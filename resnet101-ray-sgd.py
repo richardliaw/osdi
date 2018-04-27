@@ -521,6 +521,8 @@ parser = argparse.ArgumentParser()
 # Scaling
 parser.add_argument("--devices-per-actor", type=int, default=1,
     help="Number of GPU/CPU towers to use per actor")
+parser.add_argument("--override-devices", type=int, default=0,
+    help="Number of GPU/CPU towers to use per actor for real")
 parser.add_argument("--num-actors", type=int, default=1,
     help="Number of actors to use for distributed sgd")
 
@@ -651,7 +653,7 @@ if __name__ == "__main__":
     for i in range(args.num_actors):
         actors += [RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
-            use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
+            use_cpus=args.use_cpus, num_devices=args.override_devices or args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)]
         print("Creating an actor")
