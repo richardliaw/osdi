@@ -319,6 +319,9 @@ class ParameterServer(object):
         self.timeline = Timeline(tid)
         self.timeline.patch_ray()
 
+    def set_tid(self, tid):
+        self.timeline.tid = tid
+
     def get_time(self):
         return time.time() + self.timeline.offset
 
@@ -384,6 +387,16 @@ class ParameterServer(object):
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
         self.timeline.end("get")
+
+    def wait_for_grads(self, grad_shard_ids):
+        plasma_ids = [(i, ray.pyarrow.plasma.ObjectID(x)) for (i, x) in enumerate(grad_shard_ids)]
+        start = time.time()
+        while plasma_ids and time.time() - start < 5:
+            for (i, p) in plasma_ids:
+                if ray.worker.global_worker.plasma_client.contains(p):
+                    self.timeline.event("grad_{}_arrived".format(i))
+                    plasma_ids.remove((i, p))
+                    break
 
     def get_timeline(self):
         return self.timeline
@@ -483,6 +496,11 @@ def distributed_sgd_step(actors, ps_list, args):
         ps.get.remote(weight_shard_oid)
     print("Launched all aggregate ops")
 
+    if args.debug_ps:
+        for ps in ps_list:
+            ps.wait_for_grads.remote(accum_shard_ids)
+        print("Launched debug ops")
+
     timelines = [ps.get_timeline.remote() for ps in ps_list]
     print("launched timeline gets")
 
@@ -532,6 +550,8 @@ parser.add_argument("--roundrobin_ps", action="store_true",
          "and each node to only hae one actor")
 parser.add_argument("--spread_ps", action="store_true",
     help="Whether to force PS to be allocated on nodes other than SGD workers")
+parser.add_argument("--debug_ps", action="store_true",
+    help="Whether to add debug markers for timeline")
 parser.add_argument("--use-cpus", action="store_true",
     help="Whether to use CPU devices instead of GPU for debugging.")
 parser.add_argument("--set-visible-devs", action="store_false",
@@ -600,6 +620,8 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
             print("saving ps...")
 
     print("Final PS balance: ", Counter(ray.get([ps.ip.remote() for ps in final_list])))
+    for i, ps in enumerate(final_list):
+        ps.set_tid.remote(i)
     return final_list
 
 
