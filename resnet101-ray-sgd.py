@@ -688,7 +688,7 @@ if __name__ == "__main__":
             start = time.time()
             print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
-            ips = args.batch_size * args.num_actors * (args.override_devices * args.devices_per_actor) / (time.time() - start)
+            ips = args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start)
             print("Images per second", ips)
             if i > 2:
                 results.append(ips)
