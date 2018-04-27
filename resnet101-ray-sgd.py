@@ -561,8 +561,10 @@ def warmup():
 
 
 def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
+    worker_ips = ray.get([w.ip.remote() for w in sgd_workers])
+    num_ips = len(set(worker_ips))
     num_workers = len(sgd_workers)
-    min_placed = np.ceil(len(shard_shapes) / num_workers)
+    min_placed = np.ceil(len(shard_shapes) / num_ips)
     from collections import Counter, defaultdict
     tid_counter = [0]
 
@@ -572,10 +574,9 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
         return RemotePS.remote(num_workers, tid_counter[0])
 
     ip_mapping = defaultdict(list)
-    worker_ips = ray.get([w.ip.remote() for w in sgd_workers])
 
     while (any(len(v) < min_placed for v in ip_mapping.values())
-              or (len(ip_mapping) < num_workers)):
+              or (len(ip_mapping) < num_ips)):
         print("generating new ps, ip map so far", ip_mapping)
         new_ps = create_ps()
         ps_ip = ray.get(new_ps.ip.remote())
@@ -587,7 +588,7 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
     final_list = []
     candidates = list(ip_mapping.values())
     for i, s in enumerate(shard_shapes):
-        ps = candidates[i % num_workers][i // num_workers]
+        ps = candidates[i % num_ips][i // num_ips]
         final_list += [ps]
         ps.initialize.remote(s)
 
