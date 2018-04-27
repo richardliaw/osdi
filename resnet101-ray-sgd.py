@@ -469,10 +469,8 @@ def distributed_sgd_step(actors, ps_list, args):
     print("generated accum oids")
 
     # Kick off the fused compute grad / update weights tf run for each actor
-    runs = []
     for actor, grad_shard_oids in zip(actors, grad_shard_oids_list):
-        run = actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
-        runs.append(run)
+        actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
     print("Launched all ps_compute_applys on all actors")
 
     # Issue prefetch ops
@@ -486,6 +484,7 @@ def distributed_sgd_step(actors, ps_list, args):
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
+    ps_gets = []
     for j, (ps, weight_shard_oid) in list(
             enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
         if args.ps_spinwait:
@@ -493,7 +492,7 @@ def distributed_sgd_step(actors, ps_list, args):
         else:
             for grad_shard_oids in grad_shard_oids_list:
                 ps.add.remote(grad_shard_oids[j])
-        ps.get.remote(weight_shard_oid)
+        ps_gets.append(ps.get.remote(weight_shard_oid))
     print("Launched all aggregate ops")
 
     if args.debug_ps:
@@ -501,17 +500,17 @@ def distributed_sgd_step(actors, ps_list, args):
             ps.wait_for_grads.remote(accum_shard_ids)
         print("Launched debug ops")
 
-    timelines = [ps.get_timeline.remote() for ps in ps_list]
-    print("launched timeline gets")
-
-    # Wait for the round to finish (optional)
-    ray.get(runs)
     if args.verbose:
+        timelines = [ps.get_timeline.remote() for ps in ps_list]
+        print("launched timeline gets")
         timelines = ray.get(timelines)
         t0 = timelines[0]
         for t in timelines[1:]:
             t0.merge(t)
         t0.chrome_trace_format("ps_timeline.json")
+    else:
+        # Wait for at least the ps gets to finish
+        ray.get(ps_gets)
 
 
 import argparse
@@ -689,7 +688,7 @@ if __name__ == "__main__":
             start = time.time()
             print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
-            ips = args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start)
+            ips = args.batch_size * args.num_actors * (args.override_devices * args.devices_per_actor) / (time.time() - start)
             print("Images per second", ips)
             if i > 2:
                 results.append(ips)
