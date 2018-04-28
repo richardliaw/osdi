@@ -357,7 +357,6 @@ class ParameterServer(object):
                     self.timeline.end("get_buffers")
                     plasma_ids.remove(p)
                     break
-            time.sleep(.001)
         self.timeline.end("add_spinwait")
 
     def add(self, grad_shard_id):
@@ -690,7 +689,7 @@ if __name__ == "__main__":
             distributed_sgd_step(actors, ps_list, args)
             ips = args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start)
             print("Images per second", ips)
-            if i > 2:
+            if i > 3:
                 results.append(ips)
         print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
     else:
