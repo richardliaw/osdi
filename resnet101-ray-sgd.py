@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import torch
 import random
 import numpy as np
 import tensorflow as tf
@@ -11,6 +12,7 @@ import tensorflow.contrib.slim as slim
 import tensorflow.contrib.nccl as nccl
 from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
+from filelock import FileLock
 from chrome_timeline import Timeline
 import os
 import ray
@@ -20,9 +22,7 @@ import time
 def fetch(oids):
     for o in oids:
         plasma_id = ray.pyarrow.plasma.ObjectID(o)
-        print("starting fetch")
         ray.worker.global_worker.plasma_client.fetch([plasma_id])
-        print("finished fetch")
 
 
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
@@ -91,8 +91,18 @@ class SGDWorker(object):
                  verbose=False):
         # TODO - just port VariableMgrLocalReplicated
         if use_xray:
-            os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
-            print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
+            if num_devices == 4:
+                gpu0 = FileLock("/tmp/gpu0")
+                gpu1 = FileLock("/tmp/gpu1")
+                try:
+                    gpu0.acquire(timeout=0)
+                    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+                except:
+                    gpu1.acquire(timeout=0)
+                    os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+                print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.i = i
         assert num_devices > 0
         tf_session_args = {
@@ -329,7 +339,9 @@ class ParameterServer(object):
         self.timeline.offset = ref_time - time.time()
 
     def initialize(self, shard_shape):
-        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
+        buf = np.zeros(shard_shape, dtype=np.float32)
+        buf.flags.writeable = True
+        self.accumulated = torch.from_numpy(buf)
 
     def warmup(self):
         warmup()
@@ -351,13 +363,12 @@ class ParameterServer(object):
                 if ray.worker.global_worker.plasma_client.contains(p):
                     self.timeline.start("get_buffers")
                     [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([p])
-                    grads = np.frombuffer(raw_grads, dtype=np.float32)
+                    grads = torch.from_numpy(np.frombuffer(raw_grads, dtype=np.float32))
                     self.accumulated += grads
                     self.acc_counter += 1
                     self.timeline.end("get_buffers")
                     plasma_ids.remove(p)
                     break
-            time.sleep(.001)
         self.timeline.end("add_spinwait")
 
     def add(self, grad_shard_id):
@@ -379,12 +390,14 @@ class ParameterServer(object):
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
-        buff = client.create(
-            oid, self.accumulated.nbytes)
+        out = self.accumulated.numpy()
+        buff = client.create(oid, out.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
-        np.copyto(wrapper, self.accumulated)
+        np.copyto(wrapper, out)
         client.seal(oid)
-        self.accumulated = np.zeros_like(self.accumulated)
+        buf = np.zeros_like(self.accumulated)
+        buf.flags.writeable = True
+        self.accumulated = torch.from_numpy(buf)
         self.acc_counter = 0
         self.timeline.end("get")
 
@@ -469,10 +482,8 @@ def distributed_sgd_step(actors, ps_list, args):
     print("generated accum oids")
 
     # Kick off the fused compute grad / update weights tf run for each actor
-    runs = []
     for actor, grad_shard_oids in zip(actors, grad_shard_oids_list):
-        run = actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
-        runs.append(run)
+        actor.ps_compute_apply.remote(grad_shard_oids, accum_shard_ids)
     print("Launched all ps_compute_applys on all actors")
 
     # Issue prefetch ops
@@ -486,6 +497,7 @@ def distributed_sgd_step(actors, ps_list, args):
 
     # Aggregate the gradients produced by the actors. These operations
     # run concurrently with the actor methods above.
+    ps_gets = []
     for j, (ps, weight_shard_oid) in list(
             enumerate(zip(ps_list, accum_shard_ids)))[::-1]:
         if args.ps_spinwait:
@@ -493,7 +505,7 @@ def distributed_sgd_step(actors, ps_list, args):
         else:
             for grad_shard_oids in grad_shard_oids_list:
                 ps.add.remote(grad_shard_oids[j])
-        ps.get.remote(weight_shard_oid)
+        ps_gets.append(ps.get.remote(weight_shard_oid))
     print("Launched all aggregate ops")
 
     if args.debug_ps:
@@ -501,17 +513,17 @@ def distributed_sgd_step(actors, ps_list, args):
             ps.wait_for_grads.remote(accum_shard_ids)
         print("Launched debug ops")
 
-    timelines = [ps.get_timeline.remote() for ps in ps_list]
-    print("launched timeline gets")
-
-    # Wait for the round to finish (optional)
-    ray.get(runs)
     if args.verbose:
+        timelines = [ps.get_timeline.remote() for ps in ps_list]
+        print("launched timeline gets")
         timelines = ray.get(timelines)
         t0 = timelines[0]
         for t in timelines[1:]:
             t0.merge(t)
         t0.chrome_trace_format("ps_timeline.json")
+    else:
+        # Wait for at least the ps gets to finish
+        ray.get(ps_gets)
 
 
 import argparse
@@ -521,6 +533,8 @@ parser = argparse.ArgumentParser()
 # Scaling
 parser.add_argument("--devices-per-actor", type=int, default=1,
     help="Number of GPU/CPU towers to use per actor")
+parser.add_argument("--override-devices", type=int, default=0,
+    help="Number of GPU/CPU towers to use per actor for real")
 parser.add_argument("--num-actors", type=int, default=1,
     help="Number of actors to use for distributed sgd")
 
@@ -602,6 +616,8 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
         ps_ip = ray.get(new_ps.ip.remote())
         if spread_ps and ps_ip in worker_ips:
             print("ignoring ps that is on same node as worker")
+        elif not spread_ps and ps_ip not in worker_ips:
+            print("ignoring ps that NOT on same node as some worker")
         else:
             ip_mapping[ps_ip] += [new_ps]
 
@@ -651,7 +667,7 @@ if __name__ == "__main__":
     for i in range(args.num_actors):
         actors += [RemoteSGDWorker.remote(
             i, model, args.batch_size, spec,
-            use_cpus=args.use_cpus, num_devices=args.devices_per_actor,
+            use_cpus=args.use_cpus, num_devices=args.override_devices or args.devices_per_actor,
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)]
         print("Creating an actor")
@@ -687,9 +703,9 @@ if __name__ == "__main__":
             start = time.time()
             print("PS sgd step", i)
             distributed_sgd_step(actors, ps_list, args)
-            ips = args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start)
+            ips = args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start)
             print("Images per second", ips)
-            if i > 2:
+            if i > 3:
                 results.append(ips)
         print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
     else:
@@ -698,4 +714,4 @@ if __name__ == "__main__":
             start = time.time()
             print("Local sgd step", i)
             do_sgd_step(actors, args)
-            print("Images per second", args.batch_size * args.num_actors * args.devices_per_actor / (time.time() - start))
+            print("Images per second", args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start))
