@@ -56,7 +56,7 @@ if __name__ == '__main__':
     tf_args = {
         'batch_size': str(parsed_args.batch),
         'model': 'resnet101',
-        'num_gpus': str(args.gpus_per_node),
+        'num_gpus': str(parsed_args.gpus_per_node),
         'variable_update': parsed_args.var_update,
     }
     if parsed_args.var_update == "distributed_replicated":
