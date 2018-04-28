@@ -602,6 +602,8 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
         ps_ip = ray.get(new_ps.ip.remote())
         if spread_ps and ps_ip in worker_ips:
             print("ignoring ps that is on same node as worker")
+        elif not spread_ps and ps_ip not in worker_ips:
+            print("ignoring ps that NOT on same node as some worker")
         else:
             ip_mapping[ps_ip] += [new_ps]
 
