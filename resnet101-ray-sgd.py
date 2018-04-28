@@ -338,7 +338,9 @@ class ParameterServer(object):
         self.timeline.offset = ref_time - time.time()
 
     def initialize(self, shard_shape):
-        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
+        buf = np.zeros(shard_shape, dtype=np.float32)
+        buf.flags.writeable = True
+        self.accumulated = torch.from_numpy(buf)
 
     def warmup(self):
         warmup()
@@ -360,7 +362,7 @@ class ParameterServer(object):
                 if ray.worker.global_worker.plasma_client.contains(p):
                     self.timeline.start("get_buffers")
                     [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([p])
-                    grads = np.frombuffer(raw_grads, dtype=np.float32)
+                    grads = torch.from_numpy(np.frombuffer(raw_grads, dtype=np.float32))
                     self.accumulated += grads
                     self.acc_counter += 1
                     self.timeline.end("get_buffers")
@@ -387,12 +389,14 @@ class ParameterServer(object):
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
-        buff = client.create(
-            oid, self.accumulated.nbytes)
+        out = self.accumulated.numpy()
+        buff = client.create(oid, out.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
-        np.copyto(wrapper, self.accumulated)
+        np.copyto(wrapper, out)
         client.seal(oid)
-        self.accumulated = np.zeros_like(self.accumulated)
+        buf = np.zeros_like(self.accumulated)
+        buf.flags.writeable = True
+        self.accumulated = torch.from_numpy(buf)
         self.acc_counter = 0
         self.timeline.end("get")
 
