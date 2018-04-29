@@ -18,6 +18,9 @@ def convert_torch(xs):
     xs = np.array(xs)
     return Variable(torch.from_numpy(xs))
 
+def from_torch(xs):
+    return xs.data.numpy()
+
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
@@ -25,7 +28,9 @@ class Model(nn.Module):
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
         self.conv2_drop = nn.Dropout2d()
         self.fc1 = nn.Linear(36260, 50)
-        self.fc2 = nn.Linear(50, 10)
+        self.fc2 = nn.Linear(50, 6)
+        for layer in self.parameters():
+            layer.requires_grad = False
 
     def forward(self, x):
         x = F.relu(F.max_pool2d(self.conv1(x), 2))
@@ -42,7 +47,9 @@ class Simulator(object):
         self._env = gym.make(env)
         self._init_state = self._env.reset()
 
-    def onestep(self, arr):
+    def onestep(self, arr, start=False):
+        if start:
+            return self._init_state
         state = self._env.step(arr)[0]
         return state
 
@@ -69,17 +76,17 @@ class ClipperRunner(Simulator):
             name="hello-world", input_type="doubles", 
             default_output="-1.0", slo_micros=100000)
         model = Model()
-        def feature_sum(xs):
+        def policy(xs):
             xs = [preprocess(x) for x in xs]
             res = model(convert_torch(xs))
-            return res
+            return from_torch(res)
 
         python_deployer.deploy_python_closure(
-            self.clipper_conn, name="sum-model", version=1,
-            input_type="doubles", func=feature_sum)
+            self.clipper_conn, name="policy", version=1,
+            input_type="doubles", func=policy)
         
         self.clipper_conn.link_model_to_app(
-            app_name="hello-world", model_name="sum-model")
+            app_name="hello-world", model_name="policy")
         self._headers = {"Content-type": "application/json"}
 
     def run(self, steps):
@@ -91,14 +98,24 @@ class ClipperRunner(Simulator):
                                     "input": list(state)
                                 })
                   ).json()
-            arr = 0
             state = self.onestep(arr)
 
 
-if __name__ == "__main__":
+def eval():
     model = Model()
     sim = Simulator("Pong-v0")
-    xs = [sim.initial_state()]
-    xs = [preprocess(x) for x in xs]
+    ac = None
+    import time
+    start = time.time()
+    for i in range(50):
+        xs = [sim.onestep(ac, i == 0)]
+        xs = [preprocess(x) for x in xs]
+        ac = model(convert_torch(xs))
+        ac = from_torch(ac)[0].argmax()
+    print("Took %0.4f sec..." % (time.time() - start))
+
+
+if __name__ == "__main__":
+    cr = ClipperRunner("Pong-v0")
     import ipdb; ipdb.set_trace()
-    res = model(convert_torch(xs))
+    cr.run(500)
