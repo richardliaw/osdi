@@ -56,14 +56,8 @@ class Simulator(object):
     def initial_state(self):
         return self._init_state
 
-
-class ClipperRunner(Simulator):
-    def __init__(self, env):
-        super(ClipperRunner, self).__init__(env)
-        self.shape = self.initial_state().shape
-        self.start_clipper()
-
-    def start_clipper(self):
+class Clip(object):
+    def __init__(self, shape):
         print("Clipper currently assumes 1 input only!")
         from clipper_admin import ClipperConnection, DockerContainerManager
         from clipper_admin.deployers import python as python_deployer
@@ -77,9 +71,8 @@ class ClipperRunner(Simulator):
         self.clipper_conn.start_clipper()
         self.clipper_conn.register_application(
             name="hello-world", input_type="doubles", 
-            default_output="-1.0", slo_micros=100000000)
+            default_output="-1.0", slo_micros=10000000)
         ptmodel = Model()
-        shape = self.shape
         def policy(model, x):
             x = np.array(x)
             x = x.reshape(shape)
@@ -94,6 +87,12 @@ class ClipperRunner(Simulator):
         
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
+
+
+class ClipperRunner(Simulator):
+    def __init__(self, env):
+        super(ClipperRunner, self).__init__(env)
+        self.shape = self.initial_state().shape
         self._headers = {"Content-type": "application/json"}
 
     def run(self, steps):
@@ -126,4 +125,5 @@ def eval():
 
 if __name__ == "__main__":
     cr = ClipperRunner("Pong-v0")
+    c = Clip(cr.shape)
     cr.run(500)
