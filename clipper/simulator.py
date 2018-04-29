@@ -60,11 +60,13 @@ class Simulator(object):
 class ClipperRunner(Simulator):
     def __init__(self, env):
         super(ClipperRunner, self).__init__(env)
+        self.shape = self.initial_state().shape
         self.start_clipper()
 
     def start_clipper(self):
         from clipper_admin import ClipperConnection, DockerContainerManager
         from clipper_admin.deployers import python as python_deployer
+        from clipper_admin.deployers import pytorch as pytorch_deployer 
         self.clipper_conn = ClipperConnection(DockerContainerManager())
         try:
             self.clipper_conn.connect()
@@ -74,16 +76,20 @@ class ClipperRunner(Simulator):
         self.clipper_conn.start_clipper()
         self.clipper_conn.register_application(
             name="hello-world", input_type="doubles", 
-            default_output="-1.0", slo_micros=100000)
-        model = Model()
-        def policy(xs):
-            xs = [preprocess(x) for x in xs]
+            default_output="-1.0", slo_micros=100000000)
+        ptmodel = Model()
+        shape = self.shape
+        def policy(model, x):
+            x = np.array(x)
+            x = x.reshape(shape)
+            x = preprocess(x)
+            xs = [x]
             res = model(convert_torch(xs))
-            return from_torch(res)
+            return from_torch(res).argmax()
 
-        python_deployer.deploy_python_closure(
+        pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
-            input_type="doubles", func=policy)
+            input_type="doubles", func=policy, pytorch_model=ptmodel)
         
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
@@ -93,12 +99,13 @@ class ClipperRunner(Simulator):
         state = self.initial_state()
         for i in range(steps):
             res = requests.post("http://localhost:1337/hello-world/predict", 
-                                headers=headers, 
+                                headers=self._headers, 
                                 data=json.dumps({
-                                    "input": list(state)
+                                    "input": list(state.astype(float).flatten())
                                 })
                   ).json()
-            state = self.onestep(arr)
+            out = res.json()['output']
+            state = self.onestep(res)
 
 
 def eval():
