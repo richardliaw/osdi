@@ -64,6 +64,7 @@ class ClipperRunner(Simulator):
         self.start_clipper()
 
     def start_clipper(self):
+        print("Clipper currently assumes 1 input only!")
         from clipper_admin import ClipperConnection, DockerContainerManager
         from clipper_admin.deployers import python as python_deployer
         from clipper_admin.deployers import pytorch as pytorch_deployer 
@@ -85,7 +86,7 @@ class ClipperRunner(Simulator):
             x = preprocess(x)
             xs = [x]
             res = model(convert_torch(xs))
-            return from_torch(res).argmax()
+            return [from_torch(res).argmax()]
 
         pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
@@ -98,14 +99,15 @@ class ClipperRunner(Simulator):
     def run(self, steps):
         state = self.initial_state()
         for i in range(steps):
+            assert len(state.shape) == 3
             res = requests.post("http://localhost:1337/hello-world/predict", 
                                 headers=self._headers, 
                                 data=json.dumps({
                                     "input": list(state.astype(float).flatten())
                                 })
                   ).json()
-            out = res.json()['output']
-            state = self.onestep(res)
+            out = res['output']
+            state = self.onestep(out)
 
 
 def eval():
@@ -124,5 +126,4 @@ def eval():
 
 if __name__ == "__main__":
     cr = ClipperRunner("Pong-v0")
-    import ipdb; ipdb.set_trace()
     cr.run(500)
