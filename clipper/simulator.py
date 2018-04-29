@@ -1,4 +1,4 @@
-#!/usr/bin/env python 
+#!/usr/bin/env python
 import ray
 import gym
 import requests, json, numpy as np
@@ -61,7 +61,7 @@ class Clip(object):
         print("Clipper currently assumes 1 input only!")
         from clipper_admin import ClipperConnection, DockerContainerManager
         from clipper_admin.deployers import python as python_deployer
-        from clipper_admin.deployers import pytorch as pytorch_deployer 
+        from clipper_admin.deployers import pytorch as pytorch_deployer
         self.clipper_conn = ClipperConnection(DockerContainerManager())
         try:
             self.clipper_conn.connect()
@@ -70,7 +70,7 @@ class Clip(object):
             pass
         self.clipper_conn.start_clipper()
         self.clipper_conn.register_application(
-            name="hello-world", input_type="doubles", 
+            name="hello-world", input_type="doubles",
             default_output="-1.0", slo_micros=10000000)
         ptmodel = Model()
         def policy(model, x):
@@ -84,7 +84,7 @@ class Clip(object):
         pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
             input_type="doubles", func=policy, pytorch_model=ptmodel)
-        
+
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
 
@@ -99,11 +99,12 @@ class ClipperRunner(Simulator):
         state = self.initial_state()
         for i in range(steps):
             assert len(state.shape) == 3
-            res = requests.post("http://localhost:1337/hello-world/predict", 
-                                headers=self._headers, 
-                                data=json.dumps({
-                                    "input": list(state.astype(float).flatten())
-                                })
+            res = requests.post(
+                "http://localhost:1337/hello-world/predict",
+                headers=self._headers,
+                data=json.dumps({
+                    "input": list(state.astype(float).flatten())
+                })
                   ).json()
             out = res['output']
             state = self.onestep(out)
