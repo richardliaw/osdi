@@ -231,6 +231,9 @@ class SGDWorker(object):
                            tf.local_variables_initializer())
         self.sess.run(init_op)
 
+    def warmup(self):
+        warmup()
+
     def compute_apply(self, args):
         run_timeline(
             self.sess, [self.apply_op, self.nccl_control_out],
@@ -272,7 +275,10 @@ class SGDWorker(object):
             feed_dict=feed_dict,
             write_timeline=args.timeline, name="compute_apply_plasma")
 
-    def ps_compute_apply(self, out_grad_shard_oids, agg_grad_shard_oids):
+    def allreduce_compute_apply(self, out_grad_shard_oids, agg_grad_shard_oids):
+        self.ps_compute_apply(out_grad_shard_oids, agg_grad_shard_oids, tl_name="allreduce_compute_apply")
+
+    def ps_compute_apply(self, out_grad_shard_oids, agg_grad_shard_oids, tl_name="ps_compute_apply"):
         feed_dict = {
             ph: oid
             for (ph, oid) in zip(self.plasma_in_grads_oids, out_grad_shard_oids)
@@ -286,7 +292,7 @@ class SGDWorker(object):
         run_timeline(
             self.sess, [self.plasma_in_grads, self.apply_op, self.nccl_control_out],
             feed_dict=feed_dict,
-            write_timeline=args.timeline or self.iter == 2, name="ps_compute_apply")
+            write_timeline=args.timeline or self.iter == 2, name=tl_name)
 
     def compute_gradients_to_plasma_direct(self, args):
         plasma_in_grads_oids = [
@@ -636,6 +642,93 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
     return final_list
 
 
+@ray.remote
+class AllReduceActor(object):
+    def __init__(self):
+        pass
+
+    def init(self, shard_shape, actor_handles):
+        self.buffer = np.zeros(shard_shape, dtype=np.float32)
+        self.actors = actor_handles  # including handle to self...
+
+    def compute(self, in_oid, out_oid, done_oid):
+        pass  # TODO(melih)
+
+
+def create_at(ips, actor_class):
+    assigned = {}
+    print("Creating set of actors at", ips)
+    i = 0
+    while len(assigned) < len(ips):
+        i += 1
+        print("Try", i)
+        candidates = [actor_class.remote() for _ in range(len(ips))]
+        cand_ips = ray.get([c.ip.remote() for c in candidates])
+        for c_ip, cand in zip(cand_ips, candidates):
+            if c_ip in ips and c_ip not in assigned:
+                assigned[c_ip] = cand
+            else:
+                cand.__ray_terminate__.remote(cand._ray_actor_id.id())
+        print("Progress so far", assigned)
+    return [assigned[ip] for ip in ips]
+
+
+def create_allreduce_actors(actors, shard_shapes):
+    out = []
+    ips = ray.get([a.ip.remote() for a in actors])
+    for s in shard_shapes:
+        actors = create_at(ips, AllReduceActor)
+        out.append(actors)
+        for a in actors:
+            a.init.remote(s, actors)
+    return out
+
+
+def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
+    # Preallocate object ids that actors will write gradient shards to
+    in_shard_ids_per_actor = [
+        [np.random.bytes(20) for _ in shard_shapes]
+        for _ in actors
+    ]
+    print("generated allreduce in oids")
+
+    # Preallocate object ids that allreduce will write new weights to
+    out_shard_ids_per_actor = [
+        [np.random.bytes(20) for _ in shard_shapes]
+        for _ in actors
+    ]
+    print("generated allreduce out oids")
+
+    # Preallocate done oids to mark allreduce end
+    done_ids_per_actor = [
+        [np.random.bytes(20) for _ in shard_shapes]
+        for _ in actors
+    ]
+    print("generated done out oids")
+
+    # Issue the fused compute grad / update weights tf run for each actor
+    for i, actor in enumerate(actors):
+        actor.allreduce_compute_apply.remote(
+            in_shard_oids_per_actor[i], out_shard_oids_per_actor[i])
+    print("Launched all allreduce_compute_applys on all actors")
+
+    # Issue allreduce ops
+    for j in range(len(shard_shapes)):
+        for i, a in allreduce_actors_by_shard[j]:
+            a.compute.remote(
+                in_shard_oids_per_actor[i][j],
+                out_shard_oids_per_actor[i][j],
+                done_ids_per_actor[i][j])
+    print("Launched all allreduce ops")
+
+    # Wait for at least the allreduce ops to finish
+    allreduce_ops = []
+    for done_ids in done_ids_per_actor:
+        for d in done_ids:
+            allreduce_ops.append(d)
+    ray.get(allreduce_ops)
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
     if args.cluster:
@@ -669,14 +762,43 @@ if __name__ == "__main__":
         time.sleep(1)
 
     print("Test config: " + str(args))
-    if args.ps:
+    results = []
+
+    if args.allreduce:
         print("Waiting for gradient configuration")
         shard_shapes = ray.get(actors[0].shard_shapes.remote())
-        results = []
+
+        print("Making sure sgd actors start...")
+        ray.get([a.shard_shapes.remote() for a in actors])
+
+        print("Creating allreduce actors")
+        allreduce_actors = create_allreduce_actors(actors, shard_shapes)
+        assert len(allreduce_actors) == len(shard_shapes)
+
+        print("Verify actor colocation")
+        for a_list in allreduce_actors:
+            assert len(a_list) == len(actors)
+            for a, b in zip(a_list, actors):
+                a_ip, b_ip = ray.get([a.ip.remote(), b.ip.remote()])
+                assert a_ip == b_ip, (a_ip, b_ip)
+
+        print("Warming up nodes")
+        if args.warmup:
+            ray.get([a.warmup.remote() for a in actors])
+
+        step_fn = lambda: allreduce_sgd_step(actors, allreduce_actors, shard_shapes, args)
+
+    elif args.ps:
+
+        print("Waiting for gradient configuration")
+        shard_shapes = ray.get(actors[0].shard_shapes.remote())
+
         print("making sure actors start...")
         ray.get([a.shard_shapes.remote() for a in actors])
+
         print("all actors started")
         RemotePS = ray.remote(ParameterServer)
+
         if args.roundrobin_ps:
             print("## !! Round Robin Assumes Each Node only has 1 SGDWorker !!")
             assert args.cluster
@@ -686,27 +808,30 @@ if __name__ == "__main__":
             ps_list = [RemotePS.remote(len(actors), i) 
                        for i, s in enumerate(shard_shapes)]
             [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
+
         print("All PS started")
         for _ in range(10):
             [a.set_time.remote(time.time()) for a in ps_list]
             times = ray.get([a.get_time.remote() for a in ps_list])
+
         print("Clock skew ms: " + str((max(times) - min(times)) * 1000))
         if args.warmup:
             ray.get([ps.warmup.remote() for ps in ps_list])
+
         print("All PS warmed")
-        for i in range(20):
-            start = time.time()
-            print("PS sgd step", i)
-            distributed_sgd_step(actors, ps_list, args)
-            ips = args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start)
-            print("Images per second", ips)
-            if i > 3:
-                results.append(ips)
-        print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
+        step_fn = lambda: distributed_sgd_step(actors, ps_list, args)
+
     else:
         assert args.num_actors == 1
-        for i in range(10):
-            start = time.time()
-            print("Local sgd step", i)
-            do_sgd_step(actors, args)
-            print("Images per second", args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start))
+        step_fn = lambda: do_sgd_step(actors, args)
+
+    for i in range(20):
+        start = time.time()
+        print("Sgd step", i)
+        step_fn()
+        ips = args.batch_size * args.num_actors * (args.override_devices or args.devices_per_actor) / (time.time() - start)
+        print("Images per second", ips)
+        if i > 3:
+            results.append(ips)
+
+    print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
