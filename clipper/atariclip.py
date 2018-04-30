@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import ray
+import base64
 import time
 import gym
 import requests, json, numpy as np
@@ -79,7 +80,6 @@ class Simulator(object):
         return self._init_state
 
 
-
 class Clip(object):
     def __init__(self, shape):
         from clipper_admin import ClipperConnection, DockerContainerManager
@@ -93,17 +93,23 @@ class Clip(object):
             pass
         self.clipper_conn.start_clipper()
         self.clipper_conn.register_application(
-            name="hello-world", input_type="floats",
+            name="hello-world", input_type="strings",
             default_output="-1.0", slo_micros=10**8)
         ptmodel = Model()
         def policy(model, x):
             batch = (len(x))
-            x = np.array(x)
+            arr = []
+            for j in x:
+                print(type(j), len(j))
+                res = np.frombuffer(base64.decodestring(j), dtype=np.float32)
+                print(res.shape)
+                arr += [res]
+            x = np.array(arr)
             x = x.reshape((batch * shape[0],)  + shape[1:])
             return evaluate_model(model, x).reshape((batch, shape[0]))
         pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
-            input_type="floats", func=policy, pytorch_model=ptmodel)
+            input_type="strings", func=policy, pytorch_model=ptmodel)
 
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
@@ -130,7 +136,7 @@ class ClipperRunner(Simulator):
         for i in range(steps):
             assert len(state.shape) == 4
             with serialize_timer:
-                s = list(state.astype(float).flatten())
+                s = base64.b64encode(state.flatten())
                 data = json.dumps({"input": s})
             res = requests.post(
                 "http://localhost:1337/hello-world/predict",
