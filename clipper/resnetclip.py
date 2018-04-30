@@ -96,7 +96,7 @@ class ClipTF(object):
             app_name="hello-world", model_name="policy")
 
 
-class ClipperRunner(Simulator):
+class ClipperRunner(AGSimulator):
     def __init__(self, env):
         super(ClipperRunner, self).__init__(env)
         self.shape = self.initial_state().shape
