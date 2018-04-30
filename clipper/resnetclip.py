@@ -7,10 +7,10 @@ import resnet
 
 
 class AGSimulator(object):
-    def __init__(self, boardsize, action_size, batch_size):
+    def __init__(self, boardsize=19, batch_size=64):
         self.batch_size = batch_size
         self.boardsize = boardsize
-        self.action_size = actionsize
+        self.action_size = self.boardsize**2 + 1
 
     def onestep(self, arr):
         xs = np.random.normal(size=(self.batch_size, self.boardsize, self.boardsize, 3)).astype(np.float32)
@@ -23,7 +23,7 @@ class AGSimulator(object):
 
 # @ray.remote(num_gpus=1)
 class ResNetModel(object):
-    def __init__(self, batch_size):
+    def __init__(self, batch_size=64):
         self.boardsize = 19
         self.game_name = 'go'
         self.action_size = self.boardsize**2 + (1 if self.game_name == 'go' else 0)
@@ -53,17 +53,17 @@ class ResNetModel(object):
         # self.clients = [AlphaGoClient.remote(self.boardsize, self.action_size, self.batch_size)
         #                 for _ in range(self.num_clients)]
 
-    def run(self, num_clients, num_iters):
-        num_clients = num_clients
-        remote_agclient = ray.remote(alpha_go_client)
-        remaining_ids = [remote_agclient.remote(
-                            None, self.boardsize, self.action_size, self.batch_size)
-                            for i in range(num_clients)]
-        for _ in range(num_iters):
-            [ready_id], remaining_ids = ray.wait(remaining_ids)
-            xs, masks = ray.get(ready_id)
-            values = self.not_estimator.predict(xs, masks)['value']
-            remaining_ids.append(remote_agclient.remote(values, self.boardsize, self.action_size, self.batch_size))
+    # def run(self, num_clients, num_iters):
+    #     num_clients = num_clients
+    #     remote_agclient = ray.remote(alpha_go_client)
+    #     remaining_ids = [remote_agclient.remote(
+    #                         None, self.boardsize, self.action_size, self.batch_size)
+    #                         for i in range(num_clients)]
+    #     for _ in range(num_iters):
+    #         [ready_id], remaining_ids = ray.wait(remaining_ids)
+    #         xs, masks = ray.get(ready_id)
+    #         values = self.not_estimator.predict(xs, masks)['value']
+    #         remaining_ids.append(remote_agclient.remote(values, self.boardsize, self.action_size, self.batch_size))
 
 
 class ClipTF(object):
@@ -121,9 +121,9 @@ class ClipperRunner(Simulator):
 
 
 def eval_ray_batch(args):
-    model = Model()
-    RemoteSimulator = ray.remote(Simulator)
-    simulators = [RemoteSimulator.remote(args.env) for i in range(args.num_sims)]
+    estimator = ResNetModel().not_estimator
+    RemoteAGSimulator = ray.remote(AGSimulator)
+    simulators = [RemoteAGSimulator.remote(args.env) for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
     start = time.time()
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
@@ -138,7 +138,7 @@ def eval_ray_batch(args):
         counter[sim] += 1
 
         with fwd:
-            ac = evaluate_model(model, xs)
+            values = estimator.predict(xs, masks)['value']
         print(xs.shape, ac.shape)
         if counter[sim] < args.iters:
             remaining[sim.onestep.remote(ac[0], i == 0)] = sim

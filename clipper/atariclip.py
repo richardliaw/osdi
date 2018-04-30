@@ -141,23 +141,23 @@ class ClipperRunner(Simulator):
         print("Mean", serialize_timer.mean)
 
 
-class RayRunner(Simulator):
-    def __init__(self, env):
-        super(RayRunner, self).__init__(env)
-        self.shape = self.initial_state().shape
-        self.timers = {"query": TimerStat(), "step": TimerStat()}
+# class RayRunner(Simulator):
+#     def __init__(self, env):
+#         super(RayRunner, self).__init__(env)
+#         self.shape = self.initial_state().shape
+#         self.timers = {"query": TimerStat(), "step": TimerStat()}
 
-    def run(self, steps, policy_actor):
-        state = self.initial_state()
-        for i in range(steps):
-            with self.timers["query"]:
-                out = ray.get(policy_actor.query.remote(state))
+#     def run(self, steps, policy_actor):
+#         state = self.initial_state()
+#         for i in range(steps):
+#             with self.timers["query"]:
+#                 out = ray.get(policy_actor.query.remote(state))
 
-            with self.timers["step"]:
-                state = self.onestep(out)
+#             with self.timers["step"]:
+#                 state = self.onestep(out)
 
-    def stats(self):
-        return {k: v.mean for k, v in self.timers.items()}
+#     def stats(self):
+#         return {k: v.mean for k, v in self.timers.items()}
 
 
 def eval_ray_batch(args):
@@ -186,16 +186,16 @@ def eval_ray_batch(args):
     print(fwd.mean)
 
 
-def eval_ray(args):
-    RemoteRayRunner = ray.remote(RayRunner)
-    simulators = [RemoteRayRunner.remote(args.env) for i in range(args.num_sims)]
-    RemotePolicy = ray.remote(PolicyActor)
-    p = RemotePolicy.remote()
-    start = time.time()
-    ray.get([sim.run.remote(args.iters, p) for sim in simulators])
-    print("Took %0.4f sec..." % (time.time() - start))
-    stats = ray.get(simulators[0].stats.remote())
-    print(stats)
+# def eval_ray(args):
+#     RemoteRayRunner = ray.remote(RayRunner)
+#     simulators = [RemoteRayRunner.remote(args.env) for i in range(args.num_sims)]
+#     RemotePolicy = ray.remote(PolicyActor)
+#     p = RemotePolicy.remote()
+#     start = time.time()
+#     ray.get([sim.run.remote(args.iters, p) for sim in simulators])
+#     print("Took %0.4f sec..." % (time.time() - start))
+#     stats = ray.get(simulators[0].stats.remote())
+#     print(stats)
 
 
 def eval_clipper(args):
@@ -237,8 +237,6 @@ if __name__ == "__main__":
     import ray
     ray.init()
     if args.runtime == "ray":
-        eval_ray(args)
-    elif args.runtime == "raybatch":
         eval_ray_batch(args)
     elif args.runtime == "clipper":
         eval_clipper(args)
