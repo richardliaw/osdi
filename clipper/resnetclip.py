@@ -11,6 +11,8 @@ class AGSimulator(object):
         self.batch_size = batch_size
         self.boardsize = boardsize
         self.action_size = self.boardsize**2 + 1
+        state_size = (self.batch_size, self.boardsize, self.boardsize, 3)
+        self._init_state = np.random.normal(size=state_size).astype(np.float32)
 
     def onestep(self, arr):
         xs = np.random.normal(size=(self.batch_size, self.boardsize, self.boardsize, 3)).astype(np.float32)
@@ -69,8 +71,8 @@ class ResNetModel(object):
 class ClipTF(object):
     def __init__(self, shape):
         from clipper_admin import ClipperConnection, DockerContainerManager
-        # from clipper_admin.deployers import python as python_deployer
-        from clipper_admin.deployers import tensorflow as tf_deployer
+        #from clipper_admin.deployers import python as python_deployer
+        from clipper_admin.deployers import pytorch as pt_deployer
         self.clipper_conn = ClipperConnection(DockerContainerManager())
         try:
             self.clipper_conn.connect()
@@ -81,24 +83,25 @@ class ClipTF(object):
         self.clipper_conn.register_application(
             name="hello-world", input_type="floats",
             default_output="-1.0", slo_micros=10**8)
-        resnet = ResNetModel()
-        def policy(model, x):
+        from atariclip import Model
+        model = Model()
+        def policy(m, x):
             batch = (len(x))
-            x = np.array(x)
-            x = x.reshape((batch * shape[0],)  + shape[1:])
-            return model.predict(xs, masks)['value']
-        tf_deployer.deploy_tensorflow_model(
+            for i in x:
+                time.sleep(0.053)
+            return [np.ones(64, dtype=float) for i in batch]
+        import ipdb; ipdb.set_trace()
+        pt_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
-            input_type="floats", func=policy,
-            tf_sess_or_saved_model_path=resnet.not_estimator.sess)
+            input_type="floats", func=policy, pytorch_model=model)
 
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
 
 
 class ClipperRunner(AGSimulator):
-    def __init__(self, env):
-        super(ClipperRunner, self).__init__(env)
+    def __init__(self):
+        super(ClipperRunner, self).__init__()
         self.shape = self.initial_state().shape
         self._headers = {"Content-type": "application/json"}
 
@@ -123,32 +126,32 @@ class ClipperRunner(AGSimulator):
 def eval_ray_batch(args):
     estimator = ResNetModel().not_estimator
     RemoteAGSimulator = ray.remote(AGSimulator)
-    simulators = [RemoteAGSimulator.remote(args.env) for i in range(args.num_sims)]
+    simulators = [RemoteAGSimulator.remote() for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
     start = time.time()
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
-    remaining = {sim.onestep.remote(a, i == 0): sim for a, sim in zip(ac, simulators)}
+    remaining = {sim.onestep.remote(a): sim for a, sim in zip(ac, simulators)}
     counter = {sim: 0 for sim in simulators}
     fwd = TimerStat()
     while any(v < args.iters for v in counter.values()):
         # TODO: consider evaluating as ray.wait
         [data_fut], _ = ray.wait(list(remaining))
-        xs = ray.get(data_fut)
+        xs, masks = ray.get(data_fut)
         sim = remaining.pop(data_fut)
         counter[sim] += 1
 
         with fwd:
             values = estimator.predict(xs, masks)['value']
-        print(xs.shape, ac.shape)
+        print(values.shape)
         if counter[sim] < args.iters:
-            remaining[sim.onestep.remote(ac[0], i == 0)] = sim
+            remaining[sim.onestep.remote(values)] = sim
     print("Took %0.4f sec..." % (time.time() - start))
     print(fwd.mean)
 
 def eval_clipper(args):
     RemoteClipperRunner = ray.remote(ClipperRunner)
-    simulators = [RemoteClipperRunner.remote(args.env) for i in range(args.num_sims)]
-    c = Clip(ray.get(simulators[0].initial_state.remote()).shape)
+    simulators = [RemoteClipperRunner.remote() for i in range(args.num_sims)]
+    c = ClipTF(ray.get(simulators[0].initial_state.remote()).shape)
     start = time.time()
     ray.get([sim.run.remote(args.iters) for sim in simulators])
     print("Took %0.4f sec..." % (time.time() - start))
@@ -158,8 +161,6 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--runtime", type=str, choices=["ray", "clipper", "raybatch"],
     help="Choose between Ray or Clipper")
-parser.add_argument("--env", type=str, default="Pong-v0",
-    help="Env Keyword for starting a simulator")
 parser.add_argument("--num-sims", type=int, default=1,
     help="Number of simultaneous simulations to evaluate")
 parser.add_argument("--iters", type=int, default=500,
