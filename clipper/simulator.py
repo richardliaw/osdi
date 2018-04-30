@@ -51,7 +51,6 @@ def evaluate_model(model, xs):
     Args:
         xs: (N, shape)
     """
-    xs = [preprocess(x) for x in xs]
     res = model(convert_torch(xs))
     return from_torch(res).argmax(axis=1)
 
@@ -60,7 +59,7 @@ class Simulator(object):
     def __init__(self, env, batch=64):
         self._env = gym.make(env)
         _state = self._env.reset()
-        self._init_state = np.array([_state for i in range(batch)])
+        self._init_state = np.array([preprocess(_state) for i in range(batch)])
 
     def onestep(self, arr, start=False):
         state = self._init_state
@@ -68,7 +67,7 @@ class Simulator(object):
         #     return self._init_state
         # state = self._env.step(arr)[0]
 
-        return state
+        return state 
 
     def initial_state(self):
         return self._init_state
@@ -87,7 +86,7 @@ class Clip(object):
             pass
         self.clipper_conn.start_clipper()
         self.clipper_conn.register_application(
-            name="hello-world", input_type="doubles",
+            name="hello-world", input_type="floats",
             default_output="-1.0", slo_micros=10**8)
         ptmodel = Model()
         def policy(model, x):
@@ -97,7 +96,7 @@ class Clip(object):
             return evaluate_model(model, x).reshape((batch, shape[0]))
         pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
-            input_type="doubles", func=policy, pytorch_model=ptmodel)
+            input_type="floats", func=policy, pytorch_model=ptmodel)
 
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
@@ -120,16 +119,20 @@ class ClipperRunner(Simulator):
 
     def run(self, steps):
         state = self.initial_state()
+        serialize_timer = TimerStat()
         for i in range(steps):
             assert len(state.shape) == 4
-            s = list(state.astype(float).flatten())
+            with serialize_timer:
+                s = list(state.astype(float).flatten())
+                data = json.dumps({"input": s})
             res = requests.post(
                 "http://localhost:1337/hello-world/predict",
                 headers=self._headers,
-                data=json.dumps({"input": s})).json()
+                data=data).json()
             print(res)
             out = res['output']
             state = self.onestep(out)
+        print("Mean", serialize_timer.mean)
 
 
 class RayRunner(Simulator):
@@ -158,12 +161,23 @@ def eval_ray_batch(args):
     ac = [None for i in range(args.num_sims)]
     start = time.time()
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
-    for i in range(args.iters):
+    remaining = {sim.onestep.remote(a, i == 0): sim for a, sim in zip(ac, simulators)}
+    counter = {sim: 0 for sim in simulators}
+    fwd = TimerStat()
+    while any(v < args.iters for v in counter.values()):
         # TODO: consider evaluating as ray.wait
-        xs = ray.get([sim.onestep.remote(a, i == 0) for a, sim in zip(ac, simulators)])
-        xs = np.array(xs).reshape((len(xs) * init_shape[0], ) + init_shape[1:])
-        ac = evaluate_model(model, xs)
+        [data_fut], _ = ray.wait(list(remaining))
+        xs = ray.get(data_fut)
+        sim = remaining.pop(data_fut)
+        counter[sim] += 1
+
+        with fwd:
+            ac = evaluate_model(model, xs)
+        print(xs.shape, ac.shape)
+        if counter[sim] < args.iters:
+            remaining[sim.onestep.remote(ac[0], i == 0)] = sim
     print("Took %0.4f sec..." % (time.time() - start))
+    print(fwd.mean)
 
 
 def eval_ray(args):
