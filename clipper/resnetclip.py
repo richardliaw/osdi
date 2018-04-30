@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 import ray
-import requests, json, numpy as np
+import requests, json
+import numpy as np
 import time
 from timers import TimerStat
 import resnet
+import torch
 
 
 class AGSimulator(object):
@@ -13,6 +15,7 @@ class AGSimulator(object):
         self.action_size = self.boardsize**2 + 1
         state_size = (self.batch_size, self.boardsize, self.boardsize, 3)
         self._init_state = np.random.normal(size=state_size).astype(np.float32)
+        self._init_mask = np.zeros((self.batch_size, self.action_size), dtype=np.float32)
 
     def onestep(self, arr):
         xs = np.random.normal(size=(self.batch_size, self.boardsize, self.boardsize, 3)).astype(np.float32)
@@ -20,7 +23,7 @@ class AGSimulator(object):
         return xs, masks
 
     def initial_state(self):
-        return self._init_state
+        return self._init_state, self._init_mask
 
 
 # @ray.remote(num_gpus=1)
@@ -66,10 +69,36 @@ class ResNetModel(object):
     #         xs, masks = ray.get(ready_id)
     #         values = self.not_estimator.predict(xs, masks)['value']
     #         remaining_ids.append(remote_agclient.remote(values, self.boardsize, self.action_size, self.batch_size))
+import torch
+import torch.nn.functional as F
+import torch.nn as nn
 
+from torch.autograd import Variable
 
-class ClipTF(object):
-    def __init__(self, shape):
+class Model(nn.Module):
+    def __init__(self):
+        super(Model, self).__init__()
+        #self.conv1 = nn.Conv2d(3, 10, kernel_size=5)
+        #self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        #self.conv2_drop = nn.Dropout2d()
+        self.fc1 = nn.Linear(100800, 6)
+        # self.fc2 = nn.Linear(50, 6)
+        for layer in self.parameters():
+            layer.requires_grad = False
+
+    def forward(self, x):
+        #x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        #x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+        #x = F.max_pool2d(x, 3, 3)
+        #x = F.max_pool2d(x, 3, 3)
+        x = x.view(-1, 100800)
+        x = F.relu(self.fc1(x))
+        #x = F.dropout(x, training=self.training)
+        #x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+
+class Clip(object):
+    def __init__(self):
         from clipper_admin import ClipperConnection, DockerContainerManager
         #from clipper_admin.deployers import python as python_deployer
         from clipper_admin.deployers import pytorch as pt_deployer
@@ -83,14 +112,12 @@ class ClipTF(object):
         self.clipper_conn.register_application(
             name="hello-world", input_type="floats",
             default_output="-1.0", slo_micros=10**8)
-        from atariclip import Model
         model = Model()
-        def policy(m, x):
-            batch = (len(x))
-            for i in x:
+        def policy(ptmodel, inp):
+            batch = (len(inp))
+            for i in inp:
                 time.sleep(0.053)
-            return [np.ones(64, dtype=float) for i in batch]
-        import ipdb; ipdb.set_trace()
+            return [np.random.rand(64).astype(np.float32) for i in range(batch)]
         pt_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
             input_type="floats", func=policy, pytorch_model=model)
@@ -102,24 +129,21 @@ class ClipTF(object):
 class ClipperRunner(AGSimulator):
     def __init__(self):
         super(ClipperRunner, self).__init__()
-        self.shape = self.initial_state().shape
         self._headers = {"Content-type": "application/json"}
 
     def run(self, steps):
-        state = self.initial_state()
+        xs, masks = self.initial_state()
         serialize_timer = TimerStat()
         for i in range(steps):
-            assert len(state.shape) == 4
             with serialize_timer:
-                s = list(state.astype(float).flatten())
+                s = list(xs.astype(float).flatten()) + list(masks.astype(float).flatten())
                 data = json.dumps({"input": s})
             res = requests.post(
                 "http://localhost:1337/hello-world/predict",
                 headers=self._headers,
                 data=data).json()
-            print(res)
             out = res['output']
-            state = self.onestep(out)
+            xs, masks = self.onestep(out)
         print("Mean", serialize_timer.mean)
 
 
@@ -151,7 +175,7 @@ def eval_ray_batch(args):
 def eval_clipper(args):
     RemoteClipperRunner = ray.remote(ClipperRunner)
     simulators = [RemoteClipperRunner.remote() for i in range(args.num_sims)]
-    c = ClipTF(ray.get(simulators[0].initial_state.remote()).shape)
+    c = Clip()
     start = time.time()
     ray.get([sim.run.remote(args.iters) for sim in simulators])
     print("Took %0.4f sec..." % (time.time() - start))
