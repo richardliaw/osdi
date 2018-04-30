@@ -43,6 +43,13 @@ class Model(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
+def evaluate_model(model, x):
+    x = preprocess(x)
+    xs = [x]
+    res = model(convert_torch(xs))
+    return [from_torch(res).argmax()]
+
+
 class Simulator(object):
     def __init__(self, env):
         self._env = gym.make(env)
@@ -77,17 +84,21 @@ class Clip(object):
         def policy(model, x):
             x = np.array(x)
             x = x.reshape(shape)
-            x = preprocess(x)
-            xs = [x]
-            res = model(convert_torch(xs))
-            return [from_torch(res).argmax()]
-
+            return evaluate_model(model, x)
         pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
             input_type="doubles", func=policy, pytorch_model=ptmodel)
 
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
+
+
+class PolicyActor(object):
+    def __init__(self):
+        self.ptmodel = Model()
+
+    def query(self, state):
+        return evaluate_model(self.ptmodel, state)
 
 
 class ClipperRunner(Simulator):
@@ -110,7 +121,20 @@ class ClipperRunner(Simulator):
             state = self.onestep(out)
 
 
-def eval_ray(args):
+class RayRunner(Simulator):
+    def __init__(self, env):
+        super(RayRunner, self).__init__(env)
+        self.shape = self.initial_state().shape
+
+    def run(self, steps, policy_actor):
+        state = self.initial_state()
+        for i in range(steps):
+            assert len(state.shape) == 3
+            out = ray.get(policy_actor.query.remote(state))
+            state = self.onestep(out)
+
+
+def eval_ray_batch(args):
     model = Model()
     RemoteSimulator = ray.remote(Simulator)
     simulators = [RemoteSimulator.remote(args.env) for i in range(args.num_sims)]
@@ -122,6 +146,16 @@ def eval_ray(args):
         xs = [preprocess(x) for x in xs]
         ac = model(convert_torch(xs))
         ac = from_torch(ac).argmax(axis=1)
+    print("Took %0.4f sec..." % (time.time() - start))
+
+
+def eval_ray(args):
+    RemoteRayRunner = ray.remote(RayRunner)
+    simulators = [RemoteRayRunner.remote(args.env) for i in range(args.num_sims)]
+    RemotePolicy = ray.remote(PolicyActor)
+    p = RemotePolicy.remote()
+    start = time.time()
+    ray.get([sim.run.remote(args.iters, p) for sim in simulators])
     print("Took %0.4f sec..." % (time.time() - start))
 
 
