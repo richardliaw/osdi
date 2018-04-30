@@ -131,7 +131,6 @@ class ClipperRunner(Simulator):
                 "http://localhost:1337/hello-world/predict",
                 headers=self._headers,
                 data=data).json()
-            print(res)
             out = res['output']
             state = self.onestep(out)
         print("Mean", serialize_timer.mean)
