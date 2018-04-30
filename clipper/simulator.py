@@ -104,27 +104,52 @@ class ClipperRunner(Simulator):
                 headers=self._headers,
                 data=json.dumps({
                     "input": list(state.astype(float).flatten())
-                })
-                  ).json()
+                })).json()
             out = res['output']
             state = self.onestep(out)
 
 
-def eval():
+def eval_ray(args):
     model = Model()
-    sim = Simulator("Pong-v0")
-    ac = None
+    RemoteSimulator = ray.remote(Simulator)
+    simulators = [RemoteSimulator.remote(args.env) for i in range(args.num_sims)]
+    ac = [None for i in range(args.num_sims)]
     import time
     start = time.time()
-    for i in range(50):
-        xs = [sim.onestep(ac, i == 0)]
+    for i in range(args.iters):
+        # TODO: consider evaluating as ray.wait
+        xs = ray.get([sim.onestep.remote(a, i == 0) for a, sim in zip(ac, simulators)])
         xs = [preprocess(x) for x in xs]
         ac = model(convert_torch(xs))
-        ac = from_torch(ac)[0].argmax()
+        ac = from_torch(ac)[0].argmax(axis=1)
     print("Took %0.4f sec..." % (time.time() - start))
 
 
+def eval_clipper(args):
+    RemoteClipperRunner = ray.remote(ClipperRunner)
+    simulators = [RemoteClipperRunner.remote(args.env) for i in range(args.num_sims)]
+    c = Clip(ray.get(simulators[0].initial_state.remote()).shape)
+    start = time.time()
+    ray.get([sim.run.remote(args.iters) for sim in simulators])
+    print("Took %0.4f sec..." % (time.time() - start))
+
+
+
+
+import argparse
+parser = argparse.ArgumentParser()
+# Scaling
+parser.add_argument("--runtime", type=str, choices=["ray", "clipper"],
+    help="Choose between Ray or Clipper")
+parser.add_argument("--env", type=str, default="Pong-v0",
+    help="Env Keyword for starting a simulator")
+parser.add_argument("--num-sims", type=int, default=1,
+    help="Number of simultaneous simulations to evaluate")
+
+
 if __name__ == "__main__":
-    cr = ClipperRunner("Pong-v0")
-    c = Clip(cr.shape)
-    cr.run(500)
+    args = parser.parse_args()
+    if args.runtime == "ray":
+        eval_ray(args)
+    elif args.runtime == "clipper":
+        eval_clipper(args)
