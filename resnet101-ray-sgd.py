@@ -4,7 +4,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import torch
 import random
 import numpy as np
 import tensorflow as tf
@@ -339,9 +338,7 @@ class ParameterServer(object):
         self.timeline.offset = ref_time - time.time()
 
     def initialize(self, shard_shape):
-        buf = np.zeros(shard_shape, dtype=np.float32)
-        buf.flags.writeable = True
-        self.accumulated = torch.from_numpy(buf)
+        self.accumulated = np.zeros(shard_shape, dtype=np.float32)
 
     def warmup(self):
         warmup()
@@ -363,7 +360,7 @@ class ParameterServer(object):
                 if ray.worker.global_worker.plasma_client.contains(p):
                     self.timeline.start("get_buffers")
                     [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([p])
-                    grads = torch.from_numpy(np.frombuffer(raw_grads, dtype=np.float32))
+                    grads = np.frombuffer(raw_grads, dtype=np.float32)
                     self.accumulated += grads
                     self.acc_counter += 1
                     self.timeline.end("get_buffers")
@@ -390,14 +387,12 @@ class ParameterServer(object):
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
-        out = self.accumulated.numpy()
-        buff = client.create(oid, out.nbytes)
+        buff = client.create(
+            oid, self.accumulated.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
-        np.copyto(wrapper, out)
+        np.copyto(wrapper, self.accumulated)
         client.seal(oid)
-        buf = np.zeros_like(self.accumulated)
-        buf.flags.writeable = True
-        self.accumulated = torch.from_numpy(buf)
+        self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
         self.timeline.end("get")
 
