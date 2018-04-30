@@ -94,8 +94,7 @@ class Clip(object):
             batch = (len(x))
             x = np.array(x)
             x = x.reshape((batch * shape[0],)  + shape[1:])
-            print(x.shape)
-            return evaluate_model(model, x)
+            return evaluate_model(model, x).reshape((batch, shape[0]))
         pytorch_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
             input_type="doubles", func=policy, pytorch_model=ptmodel)
@@ -122,11 +121,13 @@ class ClipperRunner(Simulator):
     def run(self, steps):
         state = self.initial_state()
         for i in range(steps):
+            assert len(state.shape) == 4
             s = list(state.astype(float).flatten())
             res = requests.post(
                 "http://localhost:1337/hello-world/predict",
                 headers=self._headers,
                 data=json.dumps({"input": s})).json()
+            print(res)
             out = res['output']
             state = self.onestep(out)
 
