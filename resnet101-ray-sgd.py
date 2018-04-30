@@ -645,11 +645,13 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
 @ray.remote
 class AllReduceActor(object):
     def __init__(self):
-        pass
+        self.workers = {}
 
-    def init(self, shard_shape, actor_handles):
-        self.buffer = np.zeros(shard_shape, dtype=np.float32)
-        self.actors = actor_handles  # including handle to self...
+    def init(self, worker_index, num_workers, size, dtype=np.float32):
+        pass  # TODO(melih)
+
+    def add_remote_worker(self, index, worker):
+        self.workers[index] = worker
 
     def compute(self, in_oid, out_oid, done_oid):
         pass  # TODO(melih)
@@ -678,9 +680,12 @@ def create_allreduce_actors(actors, shard_shapes):
     ips = ray.get([a.ip.remote() for a in actors])
     for s in shard_shapes:
         actors = create_at(ips, AllReduceActor)
+        for i, a in enumerate(actors):
+            a.init.remote(i, len(actors), s)
+            for j, b in enumerate(actors):
+                if j != i:
+                    a.add_remote_worker.remote(j, b)
         out.append(actors)
-        for a in actors:
-            a.init.remote(s, actors)
     return out
 
 
