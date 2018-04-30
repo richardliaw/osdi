@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import ray
+import time
 import gym
 import requests, json, numpy as np
 import torch
@@ -114,14 +115,13 @@ def eval_ray(args):
     RemoteSimulator = ray.remote(Simulator)
     simulators = [RemoteSimulator.remote(args.env) for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
-    import time
     start = time.time()
     for i in range(args.iters):
         # TODO: consider evaluating as ray.wait
         xs = ray.get([sim.onestep.remote(a, i == 0) for a, sim in zip(ac, simulators)])
         xs = [preprocess(x) for x in xs]
         ac = model(convert_torch(xs))
-        ac = from_torch(ac)[0].argmax(axis=1)
+        ac = from_torch(ac).argmax(axis=1)
     print("Took %0.4f sec..." % (time.time() - start))
 
 
@@ -138,17 +138,20 @@ def eval_clipper(args):
 
 import argparse
 parser = argparse.ArgumentParser()
-# Scaling
 parser.add_argument("--runtime", type=str, choices=["ray", "clipper"],
     help="Choose between Ray or Clipper")
 parser.add_argument("--env", type=str, default="Pong-v0",
     help="Env Keyword for starting a simulator")
 parser.add_argument("--num-sims", type=int, default=1,
     help="Number of simultaneous simulations to evaluate")
+parser.add_argument("--iters", type=int, default=500,
+    help="Number of steps per sim to evaluate")
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
+    import ray
+    ray.init()
     if args.runtime == "ray":
         eval_ray(args)
     elif args.runtime == "clipper":
