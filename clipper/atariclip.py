@@ -28,66 +28,6 @@ def convert_torch(xs):
 def from_torch(xs):
     return xs.data.numpy()
 
-# class AlphaGoClient(object):
-#     def __init__(self, boardsize, action_size, batch_size):
-#         self.boardsize = boardsize
-#         self.action_size = action_size
-#         self.batch_size = batch_size
-#
-#     def step(self, values):
-#         xs = np.random.normal(size=(batch_size, boardsize, boardsize, 3)).astype(np.float32)
-#         masks = np.zeros((batch_size, action_size), dtype=np.float32)
-#         return xs, masks
-
-
-@ray.remote
-def alpha_go_client(values, boardsize, action_size, batch_size):
-    xs = np.random.normal(size=(batch_size, boardsize, boardsize, 3)).astype(np.float32)
-    masks = np.zeros((batch_size, action_size), dtype=np.float32)
-    return xs, masks
-
-
-# @ray.remote(num_gpus=1)
-class ResNetModel(object):
-    def __init__(self, num_clients, batch_size):
-        self.num_clients = num_clients
-        self.boardsize = 19
-        self.game_name = 'go'
-        self.action_size = self.boardsize**2 + (1 if self.game_name == 'go' else 0)
-        self.batch_size = batch_size
-        self.params = {
-            'boardsize': self.boardsize,
-            'batchn': True,
-            'channels': 256,
-            'stack_depth': 19,  # Should be 19 or 39
-            'nonlinearity': 'relu',
-            'mask': True,  # Should be True
-            'policy_head': 'az_stone',
-            'policy_head_params': {'boardsize': self.boardsize, 'actionsize': self.action_size},
-            'value_head': 'az',
-            'value_head_params': {'boardsize': self.boardsize, 'fc_width': 256},
-            'value_nonl': 'tanh',
-            'l2_strength': 10**-4,
-            'optimizer_name': 'momentum',
-            'optimizer_params': {'momentum': 0.9},
-            'lr_boundaries': [int(2e5), int(4e5), int(6e5)],
-            'lr_values': [0.2, 0.02, 0.002, 0.0002]
-        }
-
-        self.not_estimator = resnet.NotEstimator(resnet.resnet_model_fn, self.params)
-        self.not_estimator.initialize_graph()
-
-        # self.clients = [AlphaGoClient.remote(self.boardsize, self.action_size, self.batch_size)
-        #                 for _ in range(self.num_clients)]
-
-    def run(self, num_iters):
-        remaining_ids = [alpha_go_client.remote(None, self.boardsize, self.action_size, self.batch_size)]
-        for _ in range(num_iters):
-            [ready_id], remaining_ids = ray.wait(remaining_ids)
-            xs, masks = ray.get(ready_id)
-            values = self.not_estimator.predict(xs, masks)['value']
-            remaining_ids.append(alpha_go_client.remote(values, self.boardsize, self.action_size, self.batch_size))
-
 
 class Model(nn.Module):
     def __init__(self):
@@ -137,6 +77,7 @@ class Simulator(object):
 
     def initial_state(self):
         return self._init_state
+
 
 
 class Clip(object):
