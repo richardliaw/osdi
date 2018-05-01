@@ -652,7 +652,10 @@ def create_at(ips, actor_class):
     while len(assigned) < len(ips):
         i += 1
         print("Try", i)
-        candidates = [actor_class.remote() for _ in range(len(ips))]
+        candidates = []
+        for _ in range(len(ips)):
+            time.sleep(.5)
+            candidates.append(actor_class.remote())
         cand_ips = ray.get([c.ip.remote() for c in candidates])
         for c_ip, cand in zip(cand_ips, candidates):
             if c_ip in ips and c_ip not in assigned:
