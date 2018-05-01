@@ -251,6 +251,7 @@ class AllreduceRing(Worker):
         self.out_oid_bytes = out_oid_bytes
         self.done_oid_bytes = done_oid_bytes
         shard = self.ray_get(self.in_oid_bytes)
+        shard.flags.writeable = True
         self.weight_partition.set_weights(shard)
         self.iterate()
         self.timeline.end("execute")
