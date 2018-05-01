@@ -654,7 +654,7 @@ def create_at(ips, actor_class):
         print("Try", i)
         candidates = []
         for _ in range(len(ips)):
-            time.sleep(.5)
+            time.sleep(1)
             candidates.append(actor_class.remote())
         cand_ips = ray.get([c.ip.remote() for c in candidates])
         for c_ip, cand in zip(cand_ips, candidates):
