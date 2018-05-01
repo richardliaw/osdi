@@ -113,9 +113,15 @@ class Clip(object):
             name="hello-world", input_type="floats",
             default_output="-1.0", slo_micros=10**8)
         model = Model()
-        def policy(ptmodel, inp):
-            batch = (len(inp))
-            for i in inp:
+        def policy(ptmodel, x):
+            print(len(x))
+            batch = (len(x))
+            arr = []
+            for j in x:
+                print(type(j), len(j))
+                res = np.frombuffer(base64.decodestring(j), dtype=np.float32)
+                print(res.shape)
+            for i in x:
                 time.sleep(0.053)
             return [np.random.rand(64).astype(np.float32) for i in range(batch)]
         pt_deployer.deploy_pytorch_model(
@@ -132,19 +138,22 @@ class ClipperRunner(AGSimulator):
         self._headers = {"Content-type": "application/json"}
 
     def run(self, steps):
-        xs, masks = self.initial_state()
+        state = self.initial_state()
         serialize_timer = TimerStat()
+        step_timer = TimerStat()
         for i in range(steps):
-            with serialize_timer:
-                s = list(xs.astype(float).flatten()) + list(masks.astype(float).flatten())
-                data = json.dumps({"input": s})
-            res = requests.post(
-                "http://localhost:1337/hello-world/predict",
-                headers=self._headers,
-                data=data).json()
-            out = res['output']
-            xs, masks = self.onestep(out)
-        print("Mean", serialize_timer.mean)
+            with step_timer:
+                with serialize_timer:
+                    s = [base64.b64encode(xs), base64.b64encode(masks)]
+                    data = json.dumps({"input": s})
+                res = requests.post(
+                    "http://localhost:1337/hello-world/predict",
+                    headers=self._headers,
+                    data=data).json()
+                out = res['output']
+                state = self.onestep(out)
+        print("Serialize", serialize_timer.mean)
+        print("Step", step_timer.mean)
 
 
 def eval_ray_batch(args):
@@ -152,25 +161,29 @@ def eval_ray_batch(args):
     RemoteAGSimulator = ray.remote(AGSimulator)
     simulators = [RemoteAGSimulator.remote() for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
-    start = time.time()
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
     remaining = {sim.onestep.remote(a): sim for a, sim in zip(ac, simulators)}
     counter = {sim: 0 for sim in simulators}
-    fwd = TimerStat()
+    timers = {k: TimerStat() for k in ["fwd", "wait", "get",  "step"]}
+    start = time.time()
     while any(v < args.iters for v in counter.values()):
         # TODO: consider evaluating as ray.wait
-        [data_fut], _ = ray.wait(list(remaining))
-        xs, masks = ray.get(data_fut)
-        sim = remaining.pop(data_fut)
-        counter[sim] += 1
+        with timers["step"]:
+            with timers["wait"]:
+                [data_fut], _ = ray.wait(list(remaining))
+            with timers["get"]:
+                xs, masks = ray.get(data_fut)
+            sim = remaining.pop(data_fut)
+            counter[sim] += 1
 
-        with fwd:
-            values = estimator.predict(xs, masks)['value']
-        print(values.shape)
-        if counter[sim] < args.iters:
-            remaining[sim.onestep.remote(values)] = sim
+            with timers["fwd"]:
+                values = estimator.predict(xs, masks)['value']
+            if counter[sim] < args.iters:
+                remaining[sim.onestep.remote(values)] = sim
     print("Took %0.4f sec..." % (time.time() - start))
-    print(fwd.mean)
+    print(xs.shape)
+    print("\n".join(["%s: %0.5f" % (k, t.mean) for k, t in timers.items()]))
+
 
 def eval_clipper(args):
     RemoteClipperRunner = ray.remote(ClipperRunner)
@@ -181,34 +194,45 @@ def eval_clipper(args):
     print("Took %0.4f sec..." % (time.time() - start))
 
 
+def eval_simple(args):
+    model = get_model(args.model)
+    sim = Simulator(args)
+    fwd = TimerStat()
+    start = time.time()
+    ac = [None]
+    for i in range(args.iters):
+        xs = sim.onestep(ac[0], i == 0)
+        with fwd:
+            values = estimator.predict(xs, masks)['value']
+    print("Took %f sec..." % (time.time() - start))
+    print(fwd.mean, "Avg Fwd pass..")
+
+
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--runtime", type=str, choices=["ray", "clipper", "raybatch"],
+parser.add_argument("--runtime", type=str, choices=["ray", "clipper", "simple"],
     help="Choose between Ray or Clipper")
+parser.add_argument("--env", type=str, default="Pong-v0",
+    help="Env Keyword for starting a simulator")
+parser.add_argument("--batch", type=int, default=1,
+    help="Size of data")
 parser.add_argument("--num-sims", type=int, default=1,
     help="Number of simultaneous simulations to evaluate")
 parser.add_argument("--iters", type=int, default=500,
     help="Number of steps per sim to evaluate")
-
-
-def ray_main():
-    ray.init()
-    num_clients = 2
-    num_iters = 2
-    batch_size = 64
-    server = ResNetModel(num_clients, batch_size)
-    start = time.time()
-    server.run(num_iters)
-    duration = time.time() - start
-    num_processed = batch_size * num_iters
-    print('Processed {} boards per second.'.format(num_processed / duration))
+parser.add_argument("--model", type=str, default="simple",
+    help="Use a bigger CNN model.")
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    import ray
-    ray.init()
     if args.runtime == "ray":
+        import ray
+        ray.init()
         eval_ray_batch(args)
     elif args.runtime == "clipper":
+        import ray
+        ray.init()
         eval_clipper(args)
+    elif args.runtime == "simple":
+        eval_simple(args)
