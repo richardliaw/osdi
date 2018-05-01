@@ -315,6 +315,7 @@ class AllreduceRing(Worker):
     def receive_ag(self, obj):
         self.timeline.start("receive_ag")
         batch_index, batch_buffer = obj
+        batch_buffer = np.copy(batch_buffer)
         batch_buffer.flags.writeable = True
         self.weight_partition.set_partition(batch_index, batch_buffer)
         self.iteration_index = batch_index
