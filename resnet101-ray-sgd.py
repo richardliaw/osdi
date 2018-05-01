@@ -666,6 +666,7 @@ def create_at(ips, actor_class):
 def create_allreduce_actors(actors, shard_shapes):
     out = []
     ips = ray.get([a.ip.remote() for a in actors])
+    assert len(set(ips)) == len(actors)
     remote_class = ray.remote(AllReduceActor)
     for s in shard_shapes:
         actors = create_at(ips, remote_class)
@@ -703,15 +704,15 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     # Issue the fused compute grad / update weights tf run for each actor
     for i, actor in enumerate(actors):
         actor.allreduce_compute_apply.remote(
-            in_shard_oids_per_actor[i], out_shard_oids_per_actor[i])
+            in_shard_ids_per_actor[i], out_shard_ids_per_actor[i])
     print("Launched all allreduce_compute_applys on all actors")
 
     # Issue allreduce ops
     for j in range(len(shard_shapes)):
         for i, a in allreduce_actors_by_shard[j]:
             a.compute.remote(
-                in_shard_oids_per_actor[i][j],
-                out_shard_oids_per_actor[i][j],
+                in_shard_ids_per_actor[i][j],
+                out_shard_ids_per_actor[i][j],
                 done_ids_per_actor[i][j])
     print("Launched all allreduce ops")
 
