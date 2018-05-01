@@ -218,11 +218,11 @@ def eval_ray_batch(args):
     RemoteSimulator = ray.remote(Simulator)
     simulators = [RemoteSimulator.remote(args) for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
-    start = time.time()
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
     remaining = {sim.onestep.remote(a, i == 0): sim for a, sim in zip(ac, simulators)}
     counter = {sim: 0 for sim in simulators}
     timers = {k: TimerStat() for k in ["fwd", "wait", "get",  "step"]}
+    start = time.time()
     while any(v < args.iters for v in counter.values()):
         # TODO: consider evaluating as ray.wait
         with timers["step"]:
