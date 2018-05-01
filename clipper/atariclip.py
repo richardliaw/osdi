@@ -72,25 +72,44 @@ class ModelSimple(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
+class ModelDummy(nn.Module):
+    def __init__(self):
+        super(ModelDummy, self).__init__()
+        self.fc1 = nn.Linear(1, 1)
+        # self.fc2 = nn.Linear(50, 6)
+        for layer in self.parameters():
+            layer.requires_grad = False
+
+    def forward(self, x):
+        num = x.size(0)
+        return convert_torch(np.array([1 for i in range(num)]))
+
 def evaluate_model(model, xs):
     """
     Args:
         xs: (N, shape)
     """
     res = model(convert_torch(xs))
+    npar = from_torch(res)
+    if len(npar.shape) == 1:
+        return npar  # for dummy eval
     return from_torch(res).argmax(axis=1)
 
-def get_model(use_big=False):
-    if use_big:
+def get_model(model_name="simple"):
+    if model_name == "big":
         return ModelBig()
-    else:
+    elif model_name == "simple":
         return ModelSimple()
+    elif model_name == "dummy":
+        return ModelDummy()
 
 class Simulator(object):
     def __init__(self, args):
         self._env = gym.make(args.env)
         _state = self._env.reset()
         self._init_state = np.array([preprocess(_state) for i in range(args.batch)])
+        if args.batch == 0:
+            self._init_state = np.array([0], dtype=np.float32)
 
     def onestep(self, arr, start=False):
         self._init_state += 0.001
@@ -105,7 +124,7 @@ class Simulator(object):
 
 
 class Clip(object):
-    def __init__(self, shape, use_big=False):
+    def __init__(self, shape, model_name):
         from clipper_admin import ClipperConnection, DockerContainerManager
         from clipper_admin.deployers import python as python_deployer
         from clipper_admin.deployers import pytorch as pytorch_deployer
@@ -119,7 +138,7 @@ class Clip(object):
         self.clipper_conn.register_application(
             name="hello-world", input_type="strings",
             default_output="-1.0", slo_micros=10**8)
-        ptmodel = get_model(use_big)
+        ptmodel = get_model(model_name)
         def policy(model, x):
             print(len(x))
             batch = (len(x))
@@ -161,7 +180,6 @@ class ClipperRunner(Simulator):
         serialize_timer = TimerStat()
         step_timer = TimerStat()
         for i in range(steps):
-            assert len(state.shape) == 4
             with step_timer:
                 with serialize_timer:
                     s = base64.b64encode(state)
@@ -196,7 +214,7 @@ class ClipperRunner(Simulator):
 
 
 def eval_ray_batch(args):
-    model = get_model(args.use_big)
+    model = get_model(args.model)
     RemoteSimulator = ray.remote(Simulator)
     simulators = [RemoteSimulator.remote(args) for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
@@ -217,12 +235,12 @@ def eval_ray_batch(args):
         print(xs.shape, ac.shape)
         if counter[sim] < args.iters:
             remaining[sim.onestep.remote(ac[0], i == 0)] = sim
-    print("Took %0.4f sec..." % (time.time() - start))
+    print("Took %f sec..." % (time.time() - start))
     print(fwd.mean)
 
 
 def eval_simple(args):
-    model = get_model(args.use_big)
+    model = get_model(args.model)
     sim = Simulator(args)
     fwd = TimerStat()
     start = time.time()
@@ -231,7 +249,7 @@ def eval_simple(args):
         xs = sim.onestep(ac[0], i == 0)
         with fwd:
             ac = evaluate_model(model, xs)
-    print("Took %0.4f sec..." % (time.time() - start))
+    print("Took %f sec..." % (time.time() - start))
     print(fwd.mean, "Avg Fwd pass..")
 
 # def eval_ray(args):
@@ -249,10 +267,10 @@ def eval_simple(args):
 def eval_clipper(args):
     RemoteClipperRunner = ray.remote(ClipperRunner)
     simulators = [RemoteClipperRunner.remote(args) for i in range(args.num_sims)]
-    c = Clip(ray.get(simulators[0].initial_state.remote()).shape, args.use_big)
+    c = Clip(ray.get(simulators[0].initial_state.remote()).shape, args.model)
     start = time.time()
     ray.get([sim.run.remote(args.iters) for sim in simulators])
-    print("Took %0.4f sec..." % (time.time() - start))
+    print("Took %f sec..." % (time.time() - start))
 
 
 import argparse
@@ -267,8 +285,9 @@ parser.add_argument("--num-sims", type=int, default=1,
     help="Number of simultaneous simulations to evaluate")
 parser.add_argument("--iters", type=int, default=500,
     help="Number of steps per sim to evaluate")
-parser.add_argument("--use-big", action="store_true",
+parser.add_argument("--model", type=str, default="simple",
     help="Use a bigger CNN model.")
+
 
 
 
