@@ -709,7 +709,7 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
 
     # Issue allreduce ops
     for j in range(len(shard_shapes)):
-        for i, a in allreduce_actors_by_shard[j]:
+        for i, a in enumerate(allreduce_actors_by_shard[j]):
             a.compute.remote(
                 in_shard_ids_per_actor[i][j],
                 out_shard_ids_per_actor[i][j],
