@@ -119,6 +119,9 @@ class Worker(object):
     def __init__(self):
         self.workers = {}
 
+    def ip(self):
+        return ray.services.get_node_ip_address()
+
     def init(self, worker_index, num_workers, shape, dtype=np.float32):
         self.dtype = dtype
         self.size = shape[0]
