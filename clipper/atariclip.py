@@ -87,10 +87,10 @@ def get_model(use_big=False):
         return ModelSimple()
 
 class Simulator(object):
-    def __init__(self, env, batch=64):
-        self._env = gym.make(env)
+    def __init__(self, args):
+        self._env = gym.make(args.env)
         _state = self._env.reset()
-        self._init_state = np.array([preprocess(_state) for i in range(batch)])
+        self._init_state = np.array([preprocess(_state) for i in range(args.batch)])
 
     def onestep(self, arr, start=False):
         self._init_state += 0.001
@@ -151,8 +151,8 @@ class Clip(object):
 
 
 class ClipperRunner(Simulator):
-    def __init__(self, env):
-        super(ClipperRunner, self).__init__(env)
+    def __init__(self, args):
+        super(ClipperRunner, self).__init__(args)
         self.shape = self.initial_state().shape
         self._headers = {"Content-type": "application/json"}
 
@@ -198,7 +198,7 @@ class ClipperRunner(Simulator):
 def eval_ray_batch(args):
     model = get_model(args.use_big)
     RemoteSimulator = ray.remote(Simulator)
-    simulators = [RemoteSimulator.remote(args.env) for i in range(args.num_sims)]
+    simulators = [RemoteSimulator.remote(args) for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
     start = time.time()
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
@@ -223,7 +223,7 @@ def eval_ray_batch(args):
 
 def eval_simple(args):
     model = get_model(args.use_big)
-    sim = Simulator(args.env)
+    sim = Simulator(args)
     fwd = TimerStat()
     start = time.time()
     ac = [None]
@@ -236,7 +236,7 @@ def eval_simple(args):
 
 # def eval_ray(args):
 #     RemoteRayRunner = ray.remote(RayRunner)
-#     simulators = [RemoteRayRunner.remote(args.env) for i in range(args.num_sims)]
+#     simulators = [RemoteRayRunner.remote(args) for i in range(args.num_sims)]
 #     RemotePolicy = ray.remote(PolicyActor)
 #     p = RemotePolicy.remote()
 #     start = time.time()
@@ -248,7 +248,7 @@ def eval_simple(args):
 
 def eval_clipper(args):
     RemoteClipperRunner = ray.remote(ClipperRunner)
-    simulators = [RemoteClipperRunner.remote(args.env) for i in range(args.num_sims)]
+    simulators = [RemoteClipperRunner.remote(args) for i in range(args.num_sims)]
     c = Clip(ray.get(simulators[0].initial_state.remote()).shape, args.use_big)
     start = time.time()
     ray.get([sim.run.remote(args.iters) for sim in simulators])
@@ -261,6 +261,8 @@ parser.add_argument("--runtime", type=str, choices=["ray", "clipper", "simple"],
     help="Choose between Ray or Clipper")
 parser.add_argument("--env", type=str, default="Pong-v0",
     help="Env Keyword for starting a simulator")
+parser.add_argument("--batch", type=int, default=1,
+    help="Size of data")
 parser.add_argument("--num-sims", type=int, default=1,
     help="Number of simultaneous simulations to evaluate")
 parser.add_argument("--iters", type=int, default=500,
