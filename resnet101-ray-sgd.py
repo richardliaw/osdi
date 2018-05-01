@@ -673,8 +673,7 @@ def create_allreduce_actors(actors, shard_shapes):
         for i, a in enumerate(actors):
             a.init.remote(i, len(actors), s)
             for j, b in enumerate(actors):
-                if j != i:
-                    a.add_remote_worker.remote(j, b)
+                a.add_remote_worker.remote(j, b)
         out.append(actors)
     return out
 
