@@ -124,7 +124,7 @@ class Worker(object):
 
     def init(self, worker_index, num_workers, shape, dtype=np.float32):
         self.dtype = dtype
-        self.size = shape[0]
+        self.size = int(shape[0])
         self.worker_index = worker_index
         self.num_workers = num_workers
         self.weight_partition = WeightPartition(worker_index, num_workers, self.size, dtype=self.dtype)
