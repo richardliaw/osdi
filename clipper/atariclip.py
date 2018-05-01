@@ -222,21 +222,24 @@ def eval_ray_batch(args):
     init_shape = ray.get(simulators[0].initial_state.remote()).shape
     remaining = {sim.onestep.remote(a, i == 0): sim for a, sim in zip(ac, simulators)}
     counter = {sim: 0 for sim in simulators}
-    fwd = TimerStat()
+    timers = {k: TimerStat() for k in ["fwd", "wait", "get",  "step"]}
     while any(v < args.iters for v in counter.values()):
         # TODO: consider evaluating as ray.wait
-        [data_fut], _ = ray.wait(list(remaining))
-        xs = ray.get(data_fut)
-        sim = remaining.pop(data_fut)
-        counter[sim] += 1
+        with timers["step"]:
+            with timers["wait"]:
+                [data_fut], _ = ray.wait(list(remaining))
+            with timers["get"]:
+                xs = ray.get(data_fut)
+            sim = remaining.pop(data_fut)
+            counter[sim] += 1
 
-        with fwd:
-            ac = evaluate_model(model, xs)
-        print(xs.shape, ac.shape)
-        if counter[sim] < args.iters:
-            remaining[sim.onestep.remote(ac[0], i == 0)] = sim
+            with timers["fwd"]:
+                ac = evaluate_model(model, xs)
+            if counter[sim] < args.iters:
+                remaining[sim.onestep.remote(ac[0], i == 0)] = sim
     print("Took %f sec..." % (time.time() - start))
-    print(fwd.mean)
+    print(xs.shape)
+    print("\n".join(["%s: %0.5f" % (k, t.mean) for k, t in timers.items()]))
 
 
 def eval_simple(args):
