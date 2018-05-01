@@ -13,6 +13,7 @@ from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
 from filelock import FileLock
 from chrome_timeline import Timeline
+from allreduce import AllreduceRing as AllReduceActor
 import os
 import ray
 import time
@@ -642,21 +643,6 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
     return final_list
 
 
-@ray.remote
-class AllReduceActor(object):
-    def __init__(self):
-        self.workers = {}
-
-    def init(self, worker_index, num_workers, size, dtype=np.float32):
-        pass  # TODO(melih)
-
-    def add_remote_worker(self, index, worker):
-        self.workers[index] = worker
-
-    def compute(self, in_oid, out_oid, done_oid):
-        pass  # TODO(melih)
-
-
 def create_at(ips, actor_class):
     assigned = {}
     print("Creating set of actors at", ips)
@@ -678,8 +664,9 @@ def create_at(ips, actor_class):
 def create_allreduce_actors(actors, shard_shapes):
     out = []
     ips = ray.get([a.ip.remote() for a in actors])
+    remote_class = ray.remote(AllReduceActor)
     for s in shard_shapes:
-        actors = create_at(ips, AllReduceActor)
+        actors = create_at(ips, remote_class)
         for i, a in enumerate(actors):
             a.init.remote(i, len(actors), s)
             for j, b in enumerate(actors):
