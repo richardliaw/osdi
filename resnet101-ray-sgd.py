@@ -720,7 +720,7 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     allreduce_ops = []
     for done_ids in done_ids_per_actor:
         for d in done_ids:
-            allreduce_ops.append(d)
+            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
     ray.get(allreduce_ops)
 
 
