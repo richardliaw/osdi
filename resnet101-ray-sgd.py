@@ -13,6 +13,7 @@ from tensorflow.python.client import timeline
 from tfbench import model_config, allreduce
 from filelock import FileLock
 from chrome_timeline import Timeline
+from allreduce import AllreduceRing as AllReduceActor
 import os
 import ray
 import time
@@ -552,6 +553,8 @@ parser.add_argument("--local-only", action="store_true",
     help="Whether to skip the object store for performance testing.")
 parser.add_argument("--ps", action="store_true",
     help="Whether to use param server")
+parser.add_argument("--allreduce", action="store_true",
+    help="Whether to use ring allreduce")
 parser.add_argument("--split", action="store_true",
     help="Whether to split compute and apply in local only mode.")
 parser.add_argument("--plasma-op", action="store_true",
@@ -642,21 +645,6 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
     return final_list
 
 
-@ray.remote
-class AllReduceActor(object):
-    def __init__(self):
-        self.workers = {}
-
-    def init(self, worker_index, num_workers, size, dtype=np.float32):
-        pass  # TODO(melih)
-
-    def add_remote_worker(self, index, worker):
-        self.workers[index] = worker
-
-    def compute(self, in_oid, out_oid, done_oid):
-        pass  # TODO(melih)
-
-
 def create_at(ips, actor_class):
     assigned = {}
     print("Creating set of actors at", ips)
@@ -678,13 +666,14 @@ def create_at(ips, actor_class):
 def create_allreduce_actors(actors, shard_shapes):
     out = []
     ips = ray.get([a.ip.remote() for a in actors])
+    assert len(set(ips)) == len(actors)
+    remote_class = ray.remote(AllReduceActor)
     for s in shard_shapes:
-        actors = create_at(ips, AllReduceActor)
+        actors = create_at(ips, remote_class)
         for i, a in enumerate(actors):
             a.init.remote(i, len(actors), s)
             for j, b in enumerate(actors):
-                if j != i:
-                    a.add_remote_worker.remote(j, b)
+                a.add_remote_worker.remote(j, b)
         out.append(actors)
     return out
 
@@ -714,15 +703,15 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     # Issue the fused compute grad / update weights tf run for each actor
     for i, actor in enumerate(actors):
         actor.allreduce_compute_apply.remote(
-            in_shard_oids_per_actor[i], out_shard_oids_per_actor[i])
+            in_shard_ids_per_actor[i], out_shard_ids_per_actor[i])
     print("Launched all allreduce_compute_applys on all actors")
 
     # Issue allreduce ops
     for j in range(len(shard_shapes)):
-        for i, a in allreduce_actors_by_shard[j]:
-            a.compute.remote(
-                in_shard_oids_per_actor[i][j],
-                out_shard_oids_per_actor[i][j],
+        for i, a in enumerate(allreduce_actors_by_shard[j]):
+            a.execute.remote(
+                in_shard_ids_per_actor[i][j],
+                out_shard_ids_per_actor[i][j],
                 done_ids_per_actor[i][j])
     print("Launched all allreduce ops")
 
@@ -730,7 +719,7 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     allreduce_ops = []
     for done_ids in done_ids_per_actor:
         for d in done_ids:
-            allreduce_ops.append(d)
+            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
     ray.get(allreduce_ops)
 
 
