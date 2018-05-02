@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import ray
+import base64
 import requests, json
 import numpy as np
 import time
@@ -110,23 +111,24 @@ class Clip(object):
             pass
         self.clipper_conn.start_clipper()
         self.clipper_conn.register_application(
-            name="hello-world", input_type="floats",
+            name="hello-world", input_type="strings",
             default_output="-1.0", slo_micros=10**8)
         model = Model()
         def policy(ptmodel, x):
-            print(len(x))
             batch = (len(x))
-            arr = []
+            arr = [ ]
             for j in x:
-                print(type(j), len(j))
-                res = np.frombuffer(base64.decodestring(j), dtype=np.float32)
-                print(res.shape)
+                xs, masks = j.split("###")
+                res = np.frombuffer(base64.decodestring(xs), dtype=np.float32)
+                res = res.reshape((64, 19, 19, 3))
+                res = np.frombuffer(base64.decodestring(masks), dtype=np.float32)
+                res = res.reshape((64, 362))
             for i in x:
-                time.sleep(0.053)
+                time.sleep(0.051)
             return [np.random.rand(64).astype(np.float32) for i in range(batch)]
         pt_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
-            input_type="floats", func=policy, pytorch_model=model)
+            input_type="strings", func=policy, pytorch_model=model)
 
         self.clipper_conn.link_model_to_app(
             app_name="hello-world", model_name="policy")
@@ -138,20 +140,20 @@ class ClipperRunner(AGSimulator):
         self._headers = {"Content-type": "application/json"}
 
     def run(self, steps):
-        state = self.initial_state()
+        xs, masks = self.initial_state()
         serialize_timer = TimerStat()
         step_timer = TimerStat()
         for i in range(steps):
             with step_timer:
                 with serialize_timer:
-                    s = [base64.b64encode(xs), base64.b64encode(masks)]
+                    s = "###".join([base64.b64encode(xs), base64.b64encode(masks)])
                     data = json.dumps({"input": s})
                 res = requests.post(
                     "http://localhost:1337/hello-world/predict",
                     headers=self._headers,
                     data=data).json()
                 out = res['output']
-                state = self.onestep(out)
+                xs, masks = self.onestep(out)
         print("Serialize", serialize_timer.mean)
         print("Step", step_timer.mean)
 
@@ -161,7 +163,7 @@ def eval_ray_batch(args):
     RemoteAGSimulator = ray.remote(AGSimulator)
     simulators = [RemoteAGSimulator.remote() for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
-    init_shape = ray.get(simulators[0].initial_state.remote()).shape
+    init_shape = ray.get(simulators[0].initial_state.remote())
     remaining = {sim.onestep.remote(a): sim for a, sim in zip(ac, simulators)}
     counter = {sim: 0 for sim in simulators}
     timers = {k: TimerStat() for k in ["fwd", "wait", "get",  "step"]}
@@ -175,7 +177,6 @@ def eval_ray_batch(args):
                 xs, masks = ray.get(data_fut)
             sim = remaining.pop(data_fut)
             counter[sim] += 1
-
             with timers["fwd"]:
                 values = estimator.predict(xs, masks)['value']
             if counter[sim] < args.iters:
