@@ -160,7 +160,7 @@ class Worker(object):
 
     def ray_put(self, object, oid_bytes):
         plasma_id = ray.pyarrow.plasma.ObjectID(oid_bytes)
-        buff = ray.worker.global_worker.plasma_client.create(oid_bytes, object.nbytes)
+        buff = ray.worker.global_worker.plasma_client.create(plasma_id, object.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
         np.copyto(wrapper, object)
         ray.worker.global_worker.plasma_client.seal(plasma_id)
