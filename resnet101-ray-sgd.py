@@ -718,10 +718,12 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     print("Launched all allreduce ops")
 
     # Wait for at least the allreduce ops to finish
-    for done_ids in done_ids_per_actor:
-        for d in done_ids:
-            ray.get(ray.local_scheduler.ObjectID(d))
-#    ray.get(tf_ops)
+#    allreduce_ops = []
+#    for done_ids in done_ids_per_actor:
+#        for d in done_ids:
+#            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
+#    ray.get(allreduce_ops)
+    ray.get(tf_ops)
 
 
 
@@ -821,7 +823,7 @@ if __name__ == "__main__":
         assert args.num_actors == 1
         step_fn = lambda: do_sgd_step(actors, args)
 
-    for i in range(15):
+    for i in range(20):
         start = time.time()
         print("Sgd step", i)
         step_fn()
@@ -830,4 +832,6 @@ if __name__ == "__main__":
         if i > 3:
             results.append(ips)
 
+    print("Mean, Median, Max IPS", np.mean(results[:10]), np.median(results[:10]), np.max(results[:10]))
+    print("Mean, Median, Max IPS", np.mean(results[:15]), np.median(results[:15]), np.max(results[:15]))
     print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
