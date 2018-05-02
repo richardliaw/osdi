@@ -158,11 +158,11 @@ class Worker(object):
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([plasma_id])
         return np.frombuffer(raw_grads, dtype=np.float32)
 
-    def ray_put(self, object, oid_bytes):
+    def ray_put(self, obj, oid_bytes):
         plasma_id = ray.pyarrow.plasma.ObjectID(oid_bytes)
-        buff = ray.worker.global_worker.plasma_client.create(plasma_id, object.nbytes)
+        buff = ray.worker.global_worker.plasma_client.create(plasma_id, obj.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
-        np.copyto(wrapper, object)
+        np.copyto(wrapper, obj)
         ray.worker.global_worker.plasma_client.seal(plasma_id)
 
 
@@ -245,6 +245,22 @@ class AllreduceClique(Worker):
 
 class AllreduceRing(Worker):
 
+    def __init__(self):
+        super(AllreduceRing, self).__init__()
+        self.me = None
+        self.other = None
+        self.sr_remaining = -1
+        self.ag_remaining = -1
+        self.iteration_index = -1
+        self.execution_i = -1
+        self.is_sr = True
+        self.start_time = -1
+        self.inited = False
+        self.first_rcv = None
+        self.in_oid_bytes = None
+        self.out_oid_bytes = None
+        self.done_oid_bytes = None
+
     def execute(self, in_oid_bytes, out_oid_bytes, done_oid_bytes):
         self.timeline.start("execute")
         self.in_oid_bytes = in_oid_bytes
@@ -258,6 +274,7 @@ class AllreduceRing(Worker):
 
     def iterate(self):
         self.timeline.start("iterate")
+        self.inited = True
         self.me = self.workers[self.worker_index]
         self.other = self.workers[(self.worker_index + 1) % self.num_workers]
         self.sr_remaining = self.num_workers - 1
@@ -266,7 +283,10 @@ class AllreduceRing(Worker):
         self.execution_i = 0
         self.is_sr = True
         self.start_time = time.time()
-        self.me.send.remote()
+        self.send()
+        if self.first_rcv:
+            self.receive(self.first_rcv)
+            self.first_rcv = None
         self.timeline.end("iterate")
 
     def sr_done(self):
@@ -280,9 +300,11 @@ class AllreduceRing(Worker):
 
     def done(self):
         self.timeline.start("done")
+        self.inited = False
         # write object
         self.ray_put(self.weight_partition.get_weights(), self.out_oid_bytes)
-        duration = np.array([time.time() - self.start_time])
+        # write done
+        duration = np.array([time.time() - self.start_time], dtype=np.float32)
         self.ray_put(duration, self.done_oid_bytes)
         self.timeline.end("done")
 
@@ -336,6 +358,9 @@ class AllreduceRing(Worker):
 
     def receive(self, obj):
         self.timeline.start("receive")
+        if not self.inited:
+            self.first_rcv = obj
+            return
         # print("receive", self.worker_index, self.is_sr, self.iteration_index)
         if self.is_sr:
             self.receive_sr(obj)
@@ -354,6 +379,21 @@ class AllreduceRing(Worker):
             # this must be synchronous, otherwise we risk receiving before sending the next iteration.
             self.send()
         self.timeline.end("receive")
+
+
+def ray_get(oid_bytes):
+    plasma_id = ray.pyarrow.plasma.ObjectID(oid_bytes)
+    ray.worker.global_worker.plasma_client.fetch([plasma_id])
+    [result] = ray.worker.global_worker.plasma_client.get_buffers([plasma_id])
+    return np.frombuffer(result, dtype=np.float32)
+
+
+def ray_put(obj, oid_bytes):
+    plasma_id = ray.pyarrow.plasma.ObjectID(oid_bytes)
+    buff = ray.worker.global_worker.plasma_client.create(plasma_id, obj.nbytes)
+    wrapper = np.frombuffer(buff, dtype=np.float32)
+    np.copyto(wrapper, obj)
+    ray.worker.global_worker.plasma_client.seal(plasma_id)
 
 
 def main(algorithm, check_results, num_workers, size, num_iterations, burn_k, redis_address):
@@ -401,15 +441,18 @@ def main(algorithm, check_results, num_workers, size, num_iterations, burn_k, re
         assert len(set(node_ips)) == num_workers
 
     # generate oids
+    dummy_data = WeightPartition(-1, num_workers, size)
     oids = [None]*num_iterations
     for i in range(num_iterations):
         oids[i] = [None]*num_workers
         for j in range(num_workers):
-            oids[i][j] = (ray.pyarrow.plasma.ObjectID(np.random.bytes(20)),
-                          ray.pyarrow.plasma.ObjectID(np.random.bytes(20)),
-                          ray.pyarrow.plasma.ObjectID(np.random.bytes(20)))
+            oids[i][j] = (np.random.bytes(20),
+                          np.random.bytes(20),
+                          np.random.bytes(20))
+            ray_put(dummy_data.get_partition(j), oids[i][j][0])
+            assert np.allclose(dummy_data.get_partition(j), ray_get(oids[i][j][0]))
+            print("creating data", i, j)
 
-    # TODO(hme): Actually put objects in for in_oid.
     for i in range(num_iterations):
         done_oids = [None]*num_workers
         for j in range(num_workers):
@@ -417,18 +460,22 @@ def main(algorithm, check_results, num_workers, size, num_iterations, burn_k, re
             done_oids[j] = oids[i][j][2]
 
         done_plasma_ids = list(map(ray.pyarrow.plasma.ObjectID, done_oids))
-        ray.worker.global_worker.plasma_client.fetch([done_plasma_ids])
-        durations = ray.worker.global_worker.plasma_client.get_buffers([done_plasma_ids])
-        print(np.max(durations))
-        time.sleep(1)
+        # ray.worker.global_worker.plasma_client.fetch(done_plasma_ids)
+        # durations = ray.worker.global_worker.plasma_client.get_buffers(done_plasma_ids)
+        # print(i, max(list(map(lambda item: np.frombuffer(item, dtype=np.float32)[0], durations))))
+        print("wating for durations.")
+        for done_plasma_id in done_plasma_ids:
+            ray.worker.global_worker.plasma_client.fetch([done_plasma_id])
+            [duration] = ray.worker.global_worker.plasma_client.get_buffers([done_plasma_id])
+            print(i, np.frombuffer(duration, dtype=np.float32)[0])
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Benchmarks.')
-    parser.add_argument('--algorithm', default="clique", type=str, help='The algorithm to use (ring or clique).')
+    parser.add_argument('--algorithm', default="ring", type=str, help='The algorithm to use (ring or clique).')
     parser.add_argument('--check-results', action='store_true', help='Whether to check results.')
-    parser.add_argument('--num-workers', default=4, type=int, help='The number of workers to use.')
+    parser.add_argument('--num-workers', default=2, type=int, help='The number of workers to use.')
     parser.add_argument('--size', default=25000000, type=int,
                         help='The number of 32bit floats to use.')
     parser.add_argument('--num-iterations', default=10, type=int,
