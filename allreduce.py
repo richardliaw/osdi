@@ -158,9 +158,9 @@ class Worker(object):
         [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([plasma_id])
         return np.frombuffer(raw_grads, dtype=np.float32)
 
-    def ray_put(self, oid_bytes, object):
+    def ray_put(self, object, oid_bytes):
         plasma_id = ray.pyarrow.plasma.ObjectID(oid_bytes)
-        buff = ray.worker.global_worker.plasma_client.create(oid_bytes, object.nbytes)
+        buff = ray.worker.global_worker.plasma_client.create(plasma_id, object.nbytes)
         wrapper = np.frombuffer(buff, dtype=np.float32)
         np.copyto(wrapper, object)
         ray.worker.global_worker.plasma_client.seal(plasma_id)

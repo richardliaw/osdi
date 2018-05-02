@@ -652,16 +652,13 @@ def create_at(ips, actor_class):
     while len(assigned) < len(ips):
         i += 1
         print("Try", i)
-        candidates = []
-        for _ in range(len(ips)):
-            time.sleep(.5)
-            candidates.append(actor_class.remote())
-        cand_ips = ray.get([c.ip.remote() for c in candidates])
-        for c_ip, cand in zip(cand_ips, candidates):
-            if c_ip in ips and c_ip not in assigned:
-                assigned[c_ip] = cand
-            else:
-                cand.__ray_terminate__.remote(cand._ray_actor_id.id())
+        time.sleep(1)
+        cand = actor_class.remote()
+        c_ip = ray.get(cand.ip.remote())
+        if c_ip in ips and c_ip not in assigned:
+            assigned[c_ip] = cand
+        else:
+            cand.__ray_terminate__.remote(cand._ray_actor_id.id())
         print("Progress so far", assigned)
     return [assigned[ip] for ip in ips]
 
@@ -704,9 +701,11 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     print("generated done out oids")
 
     # Issue the fused compute grad / update weights tf run for each actor
+    tf_ops = []
     for i, actor in enumerate(actors):
-        actor.allreduce_compute_apply.remote(
+        t = actor.allreduce_compute_apply.remote(
             in_shard_ids_per_actor[i], out_shard_ids_per_actor[i])
+        tf_ops.append(t)
     print("Launched all allreduce_compute_applys on all actors")
 
     # Issue allreduce ops
@@ -719,11 +718,13 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     print("Launched all allreduce ops")
 
     # Wait for at least the allreduce ops to finish
-    allreduce_ops = []
-    for done_ids in done_ids_per_actor:
-        for d in done_ids:
-            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
-    ray.get(allreduce_ops)
+#    allreduce_ops = []
+#    for done_ids in done_ids_per_actor:
+#        for d in done_ids:
+#            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
+#    ray.get(allreduce_ops)
+    ray.get(tf_ops)
+
 
 
 if __name__ == "__main__":
@@ -831,4 +832,6 @@ if __name__ == "__main__":
         if i > 3:
             results.append(ips)
 
+    print("Mean, Median, Max IPS", np.mean(results[:10]), np.median(results[:10]), np.max(results[:10]))
+    print("Mean, Median, Max IPS", np.mean(results[:15]), np.median(results[:15]), np.max(results[:15]))
     print("Mean, Median, Max IPS", np.mean(results), np.median(results), np.max(results))
