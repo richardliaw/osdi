@@ -701,9 +701,11 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     print("generated done out oids")
 
     # Issue the fused compute grad / update weights tf run for each actor
+    tf_ops = []
     for i, actor in enumerate(actors):
-        actor.allreduce_compute_apply.remote(
+        t = actor.allreduce_compute_apply.remote(
             in_shard_ids_per_actor[i], out_shard_ids_per_actor[i])
+        tf_ops.append(t)
     print("Launched all allreduce_compute_applys on all actors")
 
     # Issue allreduce ops
@@ -716,11 +718,13 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     print("Launched all allreduce ops")
 
     # Wait for at least the allreduce ops to finish
-    allreduce_ops = []
-    for done_ids in done_ids_per_actor:
-        for d in done_ids:
-            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
-    ray.get(allreduce_ops)
+#    allreduce_ops = []
+#    for done_ids in done_ids_per_actor:
+#        for d in done_ids:
+#            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
+#    ray.get(allreduce_ops)
+    ray.get(tf_ops)
+
 
 
 if __name__ == "__main__":
