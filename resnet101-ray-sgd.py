@@ -654,7 +654,7 @@ def create_at(ips, actor_class):
         print("Try", i)
         time.sleep(1)
         cand = actor_class.remote()
-        c_ip = ray.get(c.ip.remote())
+        c_ip = ray.get(cand.ip.remote())
         if c_ip in ips and c_ip not in assigned:
             assigned[c_ip] = cand
         else:
