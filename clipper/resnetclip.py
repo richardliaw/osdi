@@ -154,8 +154,7 @@ class ClipperRunner(AGSimulator):
                     data=data).json()
                 out = res['output']
                 xs, masks = self.onestep(out)
-        print("Serialize", serialize_timer.mean)
-        print("Step", step_timer.mean)
+        return serialize_timer.mean, step_timer.mean
 
 
 def eval_ray_batch(args):
@@ -191,7 +190,7 @@ def eval_clipper(args):
     simulators = [RemoteClipperRunner.remote() for i in range(args.num_sims)]
     c = Clip()
     start = time.time()
-    ray.get([sim.run.remote(args.iters) for sim in simulators])
+    print(ray.get([sim.run.remote(args.iters) for sim in simulators]))
     print("Took %0.4f sec..." % (time.time() - start))
 
 
