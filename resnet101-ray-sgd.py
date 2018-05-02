@@ -718,12 +718,10 @@ def allreduce_sgd_step(actors, allreduce_actors_by_shard, shard_shapes, args):
     print("Launched all allreduce ops")
 
     # Wait for at least the allreduce ops to finish
-#    allreduce_ops = []
-#    for done_ids in done_ids_per_actor:
-#        for d in done_ids:
-#            allreduce_ops.append(ray.local_scheduler.ObjectID(d))
-#    ray.get(allreduce_ops)
-    ray.get(tf_ops)
+    for done_ids in done_ids_per_actor:
+        for d in done_ids:
+            ray.get(ray.local_scheduler.ObjectID(d))
+#    ray.get(tf_ops)
 
 
 
@@ -823,7 +821,7 @@ if __name__ == "__main__":
         assert args.num_actors == 1
         step_fn = lambda: do_sgd_step(actors, args)
 
-    for i in range(20):
+    for i in range(15):
         start = time.time()
         print("Sgd step", i)
         step_fn()
