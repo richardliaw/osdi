@@ -192,6 +192,8 @@ def eval_clipper(args):
         sleeps = 0.051
     elif args.depth == 3:
         sleeps = 0.00947
+    elif args.depth == 1:
+        sleeps = 0.00425
     else:
         raise Exception
     c = Clip(sleeps)
