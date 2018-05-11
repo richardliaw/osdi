@@ -29,7 +29,7 @@ class AGSimulator(object):
 
 # @ray.remote(num_gpus=1)
 class ResNetModel(object):
-    def __init__(self, batch_size=64):
+    def __init__(self, batch_size=64, depth=19):
         self.boardsize = 19
         self.game_name = 'go'
         self.action_size = self.boardsize**2 + (1 if self.game_name == 'go' else 0)
@@ -38,7 +38,7 @@ class ResNetModel(object):
             'boardsize': self.boardsize,
             'batchn': True,
             'channels': 256,
-            'stack_depth': 19,  # Should be 19 or 39
+            'stack_depth': depth,  # Should be 19 or 39
             'nonlinearity': 'relu',
             'mask': True,  # Should be True
             'policy_head': 'az_stone',
@@ -99,7 +99,7 @@ class Model(nn.Module):
         return F.log_softmax(x, dim=1)
 
 class Clip(object):
-    def __init__(self):
+    def __init__(self, sleep_time):
         from clipper_admin import ClipperConnection, DockerContainerManager
         #from clipper_admin.deployers import python as python_deployer
         from clipper_admin.deployers import pytorch as pt_deployer
@@ -124,7 +124,7 @@ class Clip(object):
                 res = np.frombuffer(base64.decodestring(masks), dtype=np.float32)
                 res = res.reshape((64, 362))
             for i in x:
-                time.sleep(0.051)
+                time.sleep(sleep_time)
             return [np.random.rand(64).astype(np.float32) for i in range(batch)]
         pt_deployer.deploy_pytorch_model(
             self.clipper_conn, name="policy", version=1,
@@ -154,20 +154,19 @@ class ClipperRunner(AGSimulator):
                     data=data).json()
                 out = res['output']
                 xs, masks = self.onestep(out)
-        print("Serialize", serialize_timer.mean)
-        print("Step", step_timer.mean)
+        return serialize_timer.mean, step_timer.mean
 
 
 def eval_ray_batch(args):
-    estimator = ResNetModel().not_estimator
+    estimator = ResNetModel(args.batch, args.depth).not_estimator
     RemoteAGSimulator = ray.remote(AGSimulator)
     simulators = [RemoteAGSimulator.remote() for i in range(args.num_sims)]
     ac = [None for i in range(args.num_sims)]
     init_shape = ray.get(simulators[0].initial_state.remote())
+    start = time.time()
     remaining = {sim.onestep.remote(a): sim for a, sim in zip(ac, simulators)}
     counter = {sim: 0 for sim in simulators}
     timers = {k: TimerStat() for k in ["fwd", "wait", "get",  "step"]}
-    start = time.time()
     while any(v < args.iters for v in counter.values()):
         # TODO: consider evaluating as ray.wait
         with timers["step"]:
@@ -189,9 +188,17 @@ def eval_ray_batch(args):
 def eval_clipper(args):
     RemoteClipperRunner = ray.remote(ClipperRunner)
     simulators = [RemoteClipperRunner.remote() for i in range(args.num_sims)]
-    c = Clip()
+    if args.depth == 19:
+        sleeps = 0.051
+    elif args.depth == 3:
+        sleeps = 0.00947
+    elif args.depth == 1:
+        sleeps = 0.00425
+    else:
+        raise Exception
+    c = Clip(sleeps)
     start = time.time()
-    ray.get([sim.run.remote(args.iters) for sim in simulators])
+    print(ray.get([sim.run.remote(args.iters) for sim in simulators]))
     print("Took %0.4f sec..." % (time.time() - start))
 
 
@@ -221,8 +228,8 @@ parser.add_argument("--num-sims", type=int, default=1,
     help="Number of simultaneous simulations to evaluate")
 parser.add_argument("--iters", type=int, default=500,
     help="Number of steps per sim to evaluate")
-parser.add_argument("--model", type=str, default="simple",
-    help="Use a bigger CNN model.")
+parser.add_argument("--depth", type=int, default=19,
+    help="Use a deeper model.")
 
 
 if __name__ == "__main__":

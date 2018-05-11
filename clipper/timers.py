@@ -18,7 +18,7 @@ class TimerStat(object):
     Note that this class is *not* thread-safe.
     """
 
-    def __init__(self, window_size=10):
+    def __init__(self, window_size=1000):
         self._window_size = window_size
         self._samples = []
         self._units_processed = []
