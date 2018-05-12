@@ -29,8 +29,6 @@ setup_commands:
     - test -e ray.final.tar || (wget https://s3.us-east-2.amazonaws.com/richardresults/ray.tar && mv ray.tar ray.final.tar)
     - test -e done || (rm -rf ray && tar -xf ray.final.tar && touch done)
     - cd ray; sed -i 's/if time.time() - last_heartbeat_time < AUTOSCALER_HEARTBEAT_TIMEOUT_S:/if True:/g' python/ray/autoscaler/autoscaler.py
-      #    - cp /home/ubuntu/ray_constants.py /home/ubuntu/ray/python/ray/ray_constants.py
-      #    - cp /home/ubuntu/services.py /home/ubuntu/ray/python/ray/services.py
       #    - cd osdi2018 && git reset --hard; git fetch && git checkout `cat /tmp/master`
       # git fetch && git checkout master && git pull 
 head_setup_commands:
@@ -41,6 +39,6 @@ head_start_ray_commands:
     - ray stop
     - ray start --head --redis-port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000
 worker_start_ray_commands:
-    - rm -rf /tmp/raylogs/raylet*
+    #- rm -rf /tmp/raylogs/raylet*
     - source activate tensorflow_p27 && ray stop
       # - source activate tensorflow_p27 && ray start --redis-address=$RAY_HEAD_IP:6379 --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000 
