@@ -15,8 +15,8 @@ head_node:
 worker_nodes:
     InstanceType: g2.8xlarge
     ImageId: ami-6cac0313
-file_mounts: { 
-#    /home/ubuntu/services.py:  /Users/rliaw/Research/riselab/osdi/richard/services.py 
+file_mounts: {
+#    /home/ubuntu/services.py:  /Users/rliaw/Research/riselab/osdi/richard/services.py
 # "/tmp/master": "/Users/rliaw/Research/riselab/osdi/.git/refs/heads/master"
     "/home/ubuntu/osdi2018": "/Users/rliaw/Research/riselab/osdi/"
 }
@@ -30,15 +30,18 @@ setup_commands:
     - test -e done || (rm -rf ray && tar -xf ray.final.tar && touch done)
     - cd ray; sed -i 's/if time.time() - last_heartbeat_time < AUTOSCALER_HEARTBEAT_TIMEOUT_S:/if True:/g' python/ray/autoscaler/autoscaler.py
       #    - cd osdi2018 && git reset --hard; git fetch && git checkout `cat /tmp/master`
-      # git fetch && git checkout master && git pull 
+      # git fetch && git checkout master && git pull
 head_setup_commands:
     - pip install boto3==1.4.8  # 1.4.8 adds InstanceMarketOptions
 worker_setup_commands: []
 head_start_ray_commands:
     - rm -rf /tmp/node*
     - ray stop
-    - ray start --head --redis-port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000
+    - ray start --head --redis-port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000 --num-cpus=1
 worker_start_ray_commands:
     #- rm -rf /tmp/raylogs/raylet*
+# ./resnet101-ray-sgd.py --verbose --devices-per-actor=1 --num-actors=2 --use-cpus --plasma-op --max-bytes=10000000 --ps --cluster
+
     - source activate tensorflow_p27 && ray stop
-      # - source activate tensorflow_p27 && ray start --redis-address=$RAY_HEAD_IP:6379 --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000 
+      # - source activate tensorflow_p27 && ray start --redis-address=$RAY_HEAD_IP:6379 --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000
+
