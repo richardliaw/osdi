@@ -6,7 +6,7 @@ idle_timeout_minutes: 5
 provider:
     type: aws
     region: us-east-1
-    availability_zone: us-east-1a
+    availability_zone: us-east-1f
 auth:
     ssh_user: ubuntu
 head_node:
