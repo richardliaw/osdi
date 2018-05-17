@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+# ./resnetmini.py --devices-per-actor=8 --plasma-op --max-bytes=10000000 --ps --num-actors=2 --cluster 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -149,11 +149,6 @@ class SGDWorker(object):
         self.per_device_grads = [list(zip(*dev_gv))[0] for dev_gv in self.packed_grads_and_vars]
         assert(len(self.per_device_grads) == num_devices)
         self.num_grads = num_grads = len(self.packed_grads_and_vars[0])
-        if max_bytes:
-            assert(num_grads < 314)
-            print("Packed grads => {} tensors".format(num_grads))
-        else:
-            assert(num_grads == 314)
 
         # Ops for reading grads with the right control deps
         nccl_noops = []
@@ -219,8 +214,6 @@ class SGDWorker(object):
 
         # Same shape as packed_grads_and_vars
         assert len(unpacked_gv) == num_devices
-        assert len(unpacked_gv[0]) == 314
-        assert len(unpacked_gv[0][0]) == 2
 
         apply_ops = []
         to_apply = unpacked_gv[0]
@@ -576,7 +569,7 @@ parser.add_argument("--set-visible-devs", action="store_false",
     help="Whether to set visible devices. Defaults to True; needed for x-ray.")
 parser.add_argument("--max-bytes", type=int, default=0,
     help="Max byte tensor to pack")
-parser.add_argument("--batch-size", type=int, default=64,
+parser.add_argument("--batch-size", type=int, default=1,
     help="ResNet101 batch size")
 parser.add_argument("--allreduce-spec", type=str, default="simple",
     help="Allreduce spec")
