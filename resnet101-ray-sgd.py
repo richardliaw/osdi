@@ -608,7 +608,6 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
 
     def create_ps():
         tid_counter[0] += 1
-        time.sleep(1)  # needed because resource tracking is faulty
         return RemotePS.remote(num_workers, tid_counter[0])
 
     ip_mapping = defaultdict(list)
@@ -652,7 +651,6 @@ def create_at(ips, actor_class):
     while len(assigned) < len(ips):
         i += 1
         print("Try", i)
-        time.sleep(1)
         cand = actor_class.remote()
         c_ip = ray.get(cand.ip.remote())
         if c_ip in ips and c_ip not in assigned:
@@ -757,7 +755,6 @@ if __name__ == "__main__":
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)]
         print("Creating an actor")
-        time.sleep(1)
 
     print("Test config: " + str(args))
     results = []
@@ -823,7 +820,7 @@ if __name__ == "__main__":
         assert args.num_actors == 1
         step_fn = lambda: do_sgd_step(actors, args)
 
-    for i in range(20):
+    for i in range(100):
         start = time.time()
         print("Sgd step", i)
         step_fn()
