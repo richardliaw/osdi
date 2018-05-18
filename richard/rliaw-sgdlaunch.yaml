@@ -1,6 +1,6 @@
 cluster_name: sgd
-min_workers: 1
-max_workers: 1
+min_workers: 3
+max_workers: 3
 target_utilization_fraction: 0.8
 idle_timeout_minutes: 5
 provider:
@@ -42,5 +42,5 @@ worker_start_ray_commands:
 # ./resnet101-ray-sgd.py --verbose --devices-per-actor=1 --num-actors=2 --use-cpus --plasma-op --max-bytes=10000000 --ps --cluster
 
     - source activate tensorflow_p27 && ray stop
-      # - source activate tensorflow_p27 && ray start --redis-address=$RAY_HEAD_IP:6379 --use-raylet --max-sends 8 --max-receives 8 --object-chunk-size 20000000
+    - source activate tensorflow_p27 && ray start --redis-address=$RAY_HEAD_IP:6379 --use-raylet
 
