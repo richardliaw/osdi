@@ -17,6 +17,7 @@ from allreduce import AllreduceRing as AllReduceActor
 import os
 import ray
 import time
+import pyarrow.plasma as plasma
 
 
 def fetch(oids):
@@ -166,7 +167,10 @@ class SGDWorker(object):
 
         round_robin_devices = False
         if args.plasma_op:
-            memcpy_plasma_module = tf.load_op_library("/home/ubuntu/osdi2018/ops/memcpy_plasma_op.so")
+            print("** Building Plasma Op **")
+            plasma.build_plasma_tensorflow_op()
+            # memcpy_plasma_module = tf.load_op_library("/home/ubuntu/osdi2018/ops/memcpy_plasma_op.so")
+            memcpy_plasma_module = plasma.tf_plasma_op
 
             # For fetching grads -> plasma
             self.plasma_in_grads = []

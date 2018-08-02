@@ -15,10 +15,10 @@ class Timeline(object):
         self.tid = tid
 
     def patch_ray(self):
-        orig_log = ray.worker.log
+        # orig_log = ray.worker.log
 
         def custom_log(event_type, kind, *args, **kwargs):
-            orig_log(event_type, kind, *args, **kwargs)
+            # orig_log(event_type, kind, *args, **kwargs)
             if kind == ray.worker.LOG_SPAN_START:
                 self.start(event_type)
             elif kind == ray.worker.LOG_SPAN_END:
