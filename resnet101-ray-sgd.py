@@ -91,19 +91,20 @@ class SGDWorker(object):
                  plasma_op=False,
                  verbose=False):
         # TODO - just port VariableMgrLocalReplicated
-        if use_xray:
-            if num_devices == 4:
-                gpu0 = FileLock("/tmp/gpu0")
-                gpu1 = FileLock("/tmp/gpu1")
-                try:
-                    gpu0.acquire(timeout=0)
-                    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-                except:
-                    gpu1.acquire(timeout=0)
-                    os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
-            else:
-                os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
-                print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
+#         if use_xray:
+#             print(os.environ["CUDA_VISIBLE_DEVICES"])
+#             if num_devices == 4:
+#                 gpu0 = FileLock("/tmp/gpu0")
+#                 gpu1 = FileLock("/tmp/gpu1")
+#                 try:
+#                     gpu0.acquire(timeout=0)
+#                     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+#                 except:
+#                     gpu1.acquire(timeout=0)
+#                     os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+#             else:
+#                 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+#                 print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.i = i
         assert num_devices > 0
         tf_session_args = {
