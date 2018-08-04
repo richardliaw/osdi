@@ -201,6 +201,7 @@ class SGDWorker(object):
                     with tf.control_dependencies([self.plasma_in_grads[j]]):
                         grad_ph = memcpy_plasma_module.plasma_to_tensor(
                             self.plasma_out_grads_oids[j],
+                            dtype=tf.float32,
                             plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                             plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                 grad_ph = tf.reshape(grad_ph, self.packed_grads_and_vars[0][j][0].shape)
