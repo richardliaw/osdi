@@ -87,23 +87,24 @@ class SGDWorker(object):
                  num_devices=1,
                  use_cpus=False,
                  max_bytes=0,
-                 use_xray=True,
+                 # use_xray=True,
                  plasma_op=False,
                  verbose=False):
         # TODO - just port VariableMgrLocalReplicated
-        if use_xray:
-            if num_devices == 4:
-                gpu0 = FileLock("/tmp/gpu0")
-                gpu1 = FileLock("/tmp/gpu1")
-                try:
-                    gpu0.acquire(timeout=0)
-                    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-                except:
-                    gpu1.acquire(timeout=0)
-                    os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
-            else:
-                os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
-                print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
+#         if use_xray:
+#             print(os.environ["CUDA_VISIBLE_DEVICES"])
+#             if num_devices == 4:
+#                 gpu0 = FileLock("/tmp/gpu0")
+#                 gpu1 = FileLock("/tmp/gpu1")
+#                 try:
+#                     gpu0.acquire(timeout=0)
+#                     os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+#                 except:
+#                     gpu1.acquire(timeout=0)
+#                     os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+#             else:
+#                 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+#                 print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.i = i
         assert num_devices > 0
         tf_session_args = {
@@ -201,6 +202,7 @@ class SGDWorker(object):
                     with tf.control_dependencies([self.plasma_in_grads[j]]):
                         grad_ph = memcpy_plasma_module.plasma_to_tensor(
                             self.plasma_out_grads_oids[j],
+                            dtype=tf.float32,
                             plasma_store_socket_name=ray.worker.global_worker.plasma_client.store_socket_name,
                             plasma_manager_socket_name=ray.worker.global_worker.plasma_client.manager_socket_name)
                 grad_ph = tf.reshape(grad_ph, self.packed_grads_and_vars[0][j][0].shape)
