@@ -637,7 +637,7 @@ def roundrobin_ps(ps_cls, sgd_workers, shard_shapes, spread_ps):
 
     for ps in sum(candidates, []):
         if ps not in final_list:
-            ps.__ray_terminate__.remote(ps._ray_actor_id.id())
+            ps.__ray_terminate__.remote()
             print("removing a ps...")
         else:
             print("saving ps...")
@@ -660,7 +660,7 @@ def create_at(ips, actor_class):
         if c_ip in ips and c_ip not in assigned:
             assigned[c_ip] = cand
         else:
-            cand.__ray_terminate__.remote(cand._ray_actor_id.id())
+            cand.__ray_terminate__.remote()
         print("Progress so far", assigned)
     return [assigned[ip] for ip in ips]
 
