@@ -761,6 +761,8 @@ if __name__ == "__main__":
             max_bytes=args.max_bytes, plasma_op=args.plasma_op,
             verbose=args.verbose)]
         print("Creating an actor")
+        print("SLEEPING")
+        time.sleep(1)
 
     print("Test config: " + str(args))
     results = []
