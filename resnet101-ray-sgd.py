@@ -21,9 +21,10 @@ import pyarrow.plasma as plasma
 
 
 def fetch(oids):
+    local_sched_client = ray.worker.global_worker.local_scheduler_client
     for o in oids:
-        plasma_id = ray.pyarrow.plasma.ObjectID(o)
-        ray.worker.global_worker.plasma_client.fetch([plasma_id])
+        ray_obj_id = ray.ObjectID(o)
+        local_sched_client.reconstruct_objects([ray_obj_id], True)
 
 
 def run_timeline(sess, ops, feed_dict={}, write_timeline=False, name=""):
@@ -808,7 +809,7 @@ if __name__ == "__main__":
             assert len(actors) > 1, "Need more than 1 node for round robin!"
             ps_list = roundrobin_ps(RemotePS, actors, shard_shapes, args.spread_ps)
         else:
-            ps_list = [RemotePS.remote(len(actors), i) 
+            ps_list = [RemotePS.remote(len(actors), i)
                        for i, s in enumerate(shard_shapes)]
             [ps.initialize.remote(s) for ps, s in zip(ps_list, shard_shapes)]
 
