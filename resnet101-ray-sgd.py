@@ -771,7 +771,7 @@ if __name__ == "__main__":
             verbose=args.verbose)]
         print("Creating an actor")
         print("SLEEPING")
-        time.sleep(1)
+        time.sleep(5)
 
     print("Test config: " + str(args))
     results = []
