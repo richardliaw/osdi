@@ -381,8 +381,8 @@ class ParameterServer(object):
             for p in plasma_ids:
                 if ray.worker.global_worker.plasma_client.contains(p):
                     self.timeline.start("get_buffers")
-                    [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([p])
-                    grads = np.frombuffer(raw_grads, dtype=np.float32)
+                    # [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([p])
+                    grads = ray.worker.global_worker.plasma_client.get(p)
                     self.accumulated += grads
                     self.acc_counter += 1
                     self.timeline.end("get_buffers")
@@ -397,8 +397,9 @@ class ParameterServer(object):
         # self.timeline.end("add_wait")
         self.timeline.start("get_buffers")
         oid = ray.pyarrow.plasma.ObjectID(grad_shard_id)
-        [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
-        grads = np.frombuffer(raw_grads, dtype=np.float32)
+        # [raw_grads] = ray.worker.global_worker.plasma_client.get_buffers([oid])
+        # grads = np.frombuffer(raw_grads, dtype=np.float32)
+        grads = ray.worker.global_worker.plasma_client.get(oid)
         self.timeline.end("get_buffers")
         self.accumulated += grads
         self.acc_counter += 1
@@ -409,11 +410,12 @@ class ParameterServer(object):
         client = ray.worker.global_worker.plasma_client
         assert self.acc_counter == self.num_sgd_workers, self.acc_counter
         oid = ray.pyarrow.plasma.ObjectID(object_id)
-        buff = client.create(
-            oid, self.accumulated.nbytes)
-        wrapper = np.frombuffer(buff, dtype=np.float32)
-        np.copyto(wrapper, self.accumulated)
-        client.seal(oid)
+        client.put(self.accumulated.flatten(), object_id=oid)
+        # buff = client.create(
+        #     oid, self.accumulated.nbytes)
+        # wrapper = np.frombuffer(buff, dtype=np.float32)
+        # np.copyto(wrapper, self.accumulated)
+        # client.seal(oid)
         self.accumulated = np.zeros_like(self.accumulated)
         self.acc_counter = 0
         self.timeline.end("get")
