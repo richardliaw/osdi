@@ -1,0 +1,77 @@
+# An unique identifier for the head node and workers of this cluster.
+cluster_name: sgd
+
+# The maximum number of workers nodes to launch in addition to the head
+# node. This takes precedence over min_workers. min_workers default to 0.
+min_workers: 1
+max_workers: 1
+
+# docker:
+#     image: tensorflow/tensorflow:1.5.0-py3
+#     container_name: ray_docker
+
+# Cloud-provider specific configuration.
+provider:
+    type: aws
+    region: us-east-1
+    availability_zone: us-east-1a
+
+# How Ray will authenticate with newly launched nodes.
+auth:
+    ssh_user: ubuntu
+
+head_node:
+    InstanceType: p2.8xlarge
+    ImageId: ami-076fb2ffd49699eea
+    InstanceMarketOptions:
+        MarketType: spot
+        SpotOptions:
+            MaxPrice: "9.0"
+
+
+worker_nodes:
+    InstanceType: p2.8xlarge
+    ImageId: ami-076fb2ffd49699eea
+    InstanceMarketOptions:
+        MarketType: spot
+        SpotOptions:
+            MaxPrice: "9.0"
+
+    # 
+    #     # Run workers on spot by default. Comment this out to use on-demand.
+    #     InstanceMarketOptions:
+    #         MarketType: spot
+
+setup_commands: 
+    - source activate tensorflow_p27
+    - echo "source activate tensorflow_p27; export RAY_USE_XRAY=1" >> ~/.bashrc
+    - pip install -U https://s3.us-east-2.amazonaws.com/richardresults/ray-wheels/ray-0.5.0-cp27-cp27mu-manylinux1_x86_64.whl
+
+
+file_mounts: { 
+~/osdi/: /Users/rliaw/Research/riselab/osdi/
+#"/home/ubuntu/raycode/actor.py": "/Users/rliaw/Research/riselab/ray/python/ray/actor.py",
+#"/home/ubuntu/raycode/tune/": "/Users/rliaw/Research/riselab/ray/python/ray/tune/",
+#   "/home/ubuntu/raycode/rllib/": "/Users/rliaw/Research/riselab/ray/python/ray/rllib/",
+    }
+
+# Custom commands that will be run on the head node after common setup.
+head_setup_commands: []
+# - cp /home/ubuntu/raycode/actor.py /home/ubuntu/anaconda3/envs/py27/lib/python2.7/site-packages/ray/actor.py
+#- cp -r /home/ubuntu/raycode/tune/ /home/ubuntu/anaconda3/envs/tensorflow_p36/lib/python3.6/site-packages/ray/
+#- cp -r /home/ubuntu/raycode/rllib/ /home/ubuntu/anaconda3/envs/tensorflow_p36/lib/python3.6/site-packages/ray/
+# - cp -r /home/ubuntu/raycode/rllib/ /home/ubuntu/anaconda3/envs/tensorflow_p27/lib/python2.7/site-packages/ray/
+
+# Custom commands that will be run on worker nodes after common setup.
+worker_setup_commands: []
+
+# # Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+    - ray stop
+    - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml
+
+# Command to start ray on worker nodes. You don't need to change this.
+worker_start_ray_commands: 
+    - ray stop
+    - ray start --redis-address=$RAY_HEAD_IP:6379 --object-manager-port=8076
+
