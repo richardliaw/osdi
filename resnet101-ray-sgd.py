@@ -108,7 +108,7 @@ class SGDWorker(object):
 #                 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
 #                 print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.logger = logging.getLogger("SGDWorker")
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.basicConfig(logging.DEBUG)
 
         self.i = i
         assert num_devices > 0
@@ -134,7 +134,7 @@ class SGDWorker(object):
             device = device_tmpl % device_idx
             with tf.device(device):
                 with tf.variable_scope("device_%d" % device_idx):
-                    self.logger.debug("Creating Model for Device {}." % device)
+                    self.logger.debug("Creating Model for Device {}.".format(device))
                     model = model_cls(batch=batch_size, use_cpus=use_cpus, device=device)
                     models += [model]
                     model.grads = [
