@@ -108,7 +108,7 @@ class SGDWorker(object):
 #                 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
 #                 print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
         self.logger = logging.getLogger("SGDWorker")
-        self.logger.basicConfig(logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG)
 
         self.i = i
         assert num_devices > 0
