@@ -18,6 +18,7 @@ import os
 import ray
 import time
 import pyarrow.plasma as plasma
+import logging
 
 
 def fetch(oids):
@@ -106,8 +107,12 @@ class SGDWorker(object):
 #             else:
 #                 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
 #                 print("CUDA VISIBLES", os.environ["CUDA_VISIBLE_DEVICES"])
+        self.logger = logging.getLogger("SGDWorker")
+        self.logger.setLevel(logging.DEBUG)
+
         self.i = i
         assert num_devices > 0
+        self.logger.debug("Starting Session.")
         tf_session_args = {
             "device_count": {"CPU": num_devices},
             "log_device_placement": False,
@@ -116,6 +121,7 @@ class SGDWorker(object):
         }
         config_proto = tf.ConfigProto(**tf_session_args)
         self.sess = tf.Session(config=config_proto)
+        self.logger.debug("Created Session.")
         models = []
         grad_ops = []
         self.iter = 0
@@ -128,13 +134,15 @@ class SGDWorker(object):
             device = device_tmpl % device_idx
             with tf.device(device):
                 with tf.variable_scope("device_%d" % device_idx):
-                    print("DEVICE: ", device)
+                    self.logger.debug("Creating Model for Device {}." % device)
                     model = model_cls(batch=batch_size, use_cpus=use_cpus, device=device)
                     models += [model]
                     model.grads = [
                         t for t in model.optimizer.compute_gradients(model.loss)
                         if t[0] is not None]
                     grad_ops.append(model.grads)
+
+        self.logger.debug("Created all gradient ops.")
 
         self.models = models
         if num_devices == 1:
@@ -154,7 +162,7 @@ class SGDWorker(object):
         self.num_grads = num_grads = len(self.packed_grads_and_vars[0])
         if max_bytes:
             assert(num_grads < 314)
-            print("Packed grads => {} tensors".format(num_grads))
+            self.logger.debug("Packed grads => {} tensors".format(num_grads))
         else:
             assert(num_grads == 314)
 
@@ -169,7 +177,7 @@ class SGDWorker(object):
 
         round_robin_devices = False
         if args.plasma_op:
-            print("** Building Plasma Op **")
+            self.logger.debug("** Building Plasma Op **")
             plasma.build_plasma_tensorflow_op()
             # memcpy_plasma_module = tf.load_op_library("/home/ubuntu/osdi2018/ops/memcpy_plasma_op.so")
             memcpy_plasma_module = plasma.tf_plasma_op
